@@ -1,8 +1,13 @@
 #include "LittleFSConfigRepository.h"
 #include "../../../include/config.h"
 #include <ArduinoJson.h>
+#include <algorithm>
 
 namespace Infrastructure {
+
+namespace {
+constexpr size_t kConfigJsonCapacity = 2048;
+}
 
 LittleFSConfigRepository::LittleFSConfigRepository(Core::Domain::IFileSystem* fs, const std::string& path)
     : fileSystem(fs), configPath(path.empty() ? CONFIG_FILE_PATH : path) {}
@@ -12,7 +17,7 @@ bool LittleFSConfigRepository::saveConfiguration(const Core::Domain::Configurati
         return false;
     }
 
-    StaticJsonDocument<1024> doc;
+    DynamicJsonDocument doc(kConfigJsonCapacity);
     doc["centralSystemUrl"] = config.centralSystemUrl;
     doc["chargePointId"] = config.chargePointId;
     doc["chargePointPassword"] = config.chargePointPassword;
@@ -38,8 +43,14 @@ bool LittleFSConfigRepository::saveConfiguration(const Core::Domain::Configurati
         cipherSuites.add(suite);
     }
 
+    if (doc.overflowed()) {
+        return false;
+    }
+
     std::string output;
-    serializeJson(doc, output);
+    if (serializeJson(doc, output) == 0) {
+        return false;
+    }
     return fileSystem->writeFile(configPath, output);
 }
 
@@ -58,7 +69,9 @@ Core::Domain::Configuration LittleFSConfigRepository::loadConfiguration() {
         return config;
     }
 
-    StaticJsonDocument<1024> doc;
+    size_t capacity = content.size() + 512;
+    capacity = std::max(capacity, kConfigJsonCapacity);
+    DynamicJsonDocument doc(capacity);
     auto err = deserializeJson(doc, content);
     if (err) {
         return config;

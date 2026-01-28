@@ -4,7 +4,7 @@
 namespace Infrastructure {
 
 bool LittleFSFileSystem::initialize() {
-    return LittleFS.begin(true);
+    return LittleFS.begin(false);
 }
 
 bool LittleFSFileSystem::writeFile(const std::string& path, const std::string& content) {

@@ -392,7 +392,7 @@ void test_domain_entities_integration() {
     session.isComplete = true;
     
     // Completion validation
-    TEST_ASSERT_GREATER_THAN(session.meterStart, session.meterStop);
+    TEST_ASSERT_GREATER_THAN(session.meterStop, session.meterStart);
     TEST_ASSERT_TRUE(session.isComplete);
     TEST_ASSERT_FALSE(session.stopTime.empty());
     

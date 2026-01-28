@@ -74,6 +74,10 @@ void setup() {
         nullptr,
         useCaseFactory.get());
 
+    if (!ocppClient->connect()) {
+        Serial.println("OCPP client connection failed");
+    }
+
     Serial.println("ESP32 OCPP Charging Station - bootstrap");
 }
 

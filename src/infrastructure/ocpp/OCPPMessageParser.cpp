@@ -97,6 +97,47 @@ std::string OCPPMessageParser::serializeCallError(const std::string& messageId, 
     return result;
 }
 
+bool OCPPMessageParser::validateMessage(const OCPPMessage& message) {
+    if (message.messageId.empty()) {
+        Serial.println("Message validation failed: empty messageId");
+        return false;
+    }
+
+    switch (message.messageType) {
+        case MessageType::CALL:
+            if (message.action.empty()) {
+                Serial.println("Message validation failed: CALL missing action");
+                return false;
+            }
+            if (!message.payload.is<JsonObject>()) {
+                Serial.println("Message validation failed: CALL payload is not object");
+                return false;
+            }
+            break;
+        case MessageType::CALLRESULT:
+            if (!message.result.is<JsonObject>()) {
+                Serial.println("Message validation failed: CALLRESULT payload is not object");
+                return false;
+            }
+            break;
+        case MessageType::CALLERROR:
+            if (message.errorCode.empty() || message.errorDescription.empty()) {
+                Serial.println("Message validation failed: CALLERROR missing fields");
+                return false;
+            }
+            if (!message.errorDetails.isNull() && !message.errorDetails.is<JsonObject>()) {
+                Serial.println("Message validation failed: CALLERROR details not object");
+                return false;
+            }
+            break;
+        default:
+            Serial.println("Message validation failed: unknown type");
+            return false;
+    }
+
+    return true;
+}
+
 bool OCPPMessageParser::validateMessageFormat(const JsonArray& messageArray) {
     if (messageArray.size() < 3) {
         Serial.println("Message array too short");

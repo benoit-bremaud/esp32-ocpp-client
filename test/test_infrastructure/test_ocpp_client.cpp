@@ -64,6 +64,22 @@ void test_parse_call_error_message() {
     TEST_ASSERT_EQUAL_STRING("Request not supported", parsedMessage->errorDescription.c_str());
 }
 
+void test_validate_message_call_ok() {
+    std::string callMessage = R"([2,"12345","BootNotification",{"chargePointModel":"ESP32","chargePointVendor":"Test"}])";
+
+    auto parsedMessage = OCPPMessageParser::parseMessage(callMessage);
+
+    TEST_ASSERT_NOT_NULL(parsedMessage.get());
+    TEST_ASSERT_TRUE(OCPPMessageParser::validateMessage(*parsedMessage));
+}
+
+void test_validate_message_missing_action() {
+    OCPPMessage message(MessageType::CALL, "1");
+    message.payload.to<JsonObject>();
+
+    TEST_ASSERT_FALSE(OCPPMessageParser::validateMessage(message));
+}
+
 void test_serialize_call_message() {
     JsonDocument payload;
     payload["chargePointModel"] = "ESP32";
@@ -160,6 +176,8 @@ void setup() {
     RUN_TEST(test_parse_call_message);
     RUN_TEST(test_parse_call_result_message);
     RUN_TEST(test_parse_call_error_message);
+    RUN_TEST(test_validate_message_call_ok);
+    RUN_TEST(test_validate_message_missing_action);
     RUN_TEST(test_serialize_call_message);
     RUN_TEST(test_serialize_call_result_message);
     RUN_TEST(test_websocket_connection_success);
