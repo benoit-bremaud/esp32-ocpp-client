@@ -26,7 +26,8 @@ namespace Infrastructure {
         
         bool connected = false;
         bool heartbeatEnabled = false;
-        uint32_t heartbeatInterval = 30;\n        unsigned long lastHeartbeat = 0;
+        uint32_t heartbeatInterval = 30;
+        unsigned long lastHeartbeat = 0;
         
         // Security profile implementations
         bool setupProfile1Connection(const std::string& url);

@@ -354,13 +354,13 @@ CommandResult<bool> MeterValuesUseCase::execute(const MeterValuesCommand& reques
     return CommandResult<bool>::Success(true);
 }
 
-std::vector<MeterValuesCommand::MeterValueData> MeterValuesUseCase::collectMeterValues(int connectorId) {
-    std::vector<MeterValuesCommand::MeterValueData> values;
+std::vector<MeterValueData> MeterValuesUseCase::collectMeterValues(int connectorId) {
+    std::vector<MeterValueData> values;
     
     // Collect energy meter value
     float current = hardware->getCurrentMeterValue(connectorId);
     if (current > 0) {
-        MeterValuesCommand::MeterValueData energyValue;
+        MeterValueData energyValue;
         energyValue.value = std::to_string((int)(current * 1000)); // Convert to mA
         energyValue.measurand = "Current.Import";
         energyValue.unit = "A";
@@ -374,7 +374,7 @@ std::vector<MeterValuesCommand::MeterValueData> MeterValuesUseCase::collectMeter
     return values;
 }
 
-bool MeterValuesUseCase::validateMeterValues(const std::vector<MeterValuesCommand::MeterValueData>& values) {
+bool MeterValuesUseCase::validateMeterValues(const std::vector<MeterValueData>& values) {
     for (const auto& value : values) {
         if (value.value.empty()) {
             Serial.println("Empty meter value detected");

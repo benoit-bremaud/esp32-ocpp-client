@@ -44,7 +44,6 @@ namespace Application {
         
         // Event processing
         void processEvents();
-        void publishEvent(const SystemEvent& event);
         
         // Hardware event handlers
         void onConnectorPlugged(int connectorId);
@@ -77,6 +76,9 @@ namespace Application {
         bool initialize();
         void shutdown();
         void loop(); // Must be called regularly in main loop
+        
+        // Event publishing
+        void publishEvent(const SystemEvent& event);
         
         // Transaction management
         CommandResult<TransactionResult> startTransaction(const std::string& idTag, int connectorId);

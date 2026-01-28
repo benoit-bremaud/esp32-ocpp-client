@@ -3,12 +3,9 @@
 #include <string>
 #include <functional>
 #include <ArduinoJson.h>
+#include "../entities/OCPPEntities.h"
 
 namespace Domain {
-    
-    // Forward declarations
-    class Transaction;
-    class Configuration;
     
     /**
      * @brief Repository interface for managing OCPP configuration
@@ -48,6 +45,12 @@ namespace Domain {
         virtual bool isConnectorPlugged(int connectorId) = 0;
         virtual std::string readRFIDTag() = 0;
         virtual void setStatusLED(int connectorId, const std::string& status) = 0;
+        virtual bool isEmergencyStopPressed() = 0;
+        
+        // Callback setters
+        virtual void setConnectorCallback(std::function<void(int, bool)> callback) = 0;
+        virtual void setRFIDCallback(std::function<void(const std::string&)> callback) = 0;
+        virtual void setEmergencyCallback(std::function<void()> callback) = 0;
     };
     
     /**

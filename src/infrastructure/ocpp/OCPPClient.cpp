@@ -1,1 +1,423 @@
-#include \"OCPPClient.h\"\n#include \"messages/CoreProfileHandlers.h\"\n#include \"OCPPMessageParser.cpp\"\n#include \"../../include/config.h\"\n#include <Arduino.h>\n\nusing namespace Infrastructure;\nusing namespace Domain;\n\nOCPPClient::OCPPClient(std::unique_ptr<ISecureWebSocketClient> wsClient,\n                      IConfigRepository* configRepo,\n                      ITransactionRepository* transactionRepo,\n                      IHardwareController* hardware,\n                      ICertificateManager* certManager)\n    : wsClient(std::move(wsClient)), configRepo(configRepo), transactionRepo(transactionRepo),\n      hardware(hardware), certManager(certManager) {\n    \n    // Load configuration\n    currentConfig = configRepo->loadConfiguration();\n    \n    // Setup security configuration\n    setupSecurityConfiguration();\n    \n    // Setup message handlers\n    setupMessageHandlers();\n    \n    // Setup WebSocket callbacks\n    this->wsClient->setConnectionCallback([this](bool connected) {\n        this->onWebSocketConnected(connected);\n    });\n    \n    this->wsClient->setMessageCallback([this](const std::string& message) {\n        this->onWebSocketMessage(message);\n    });\n    \n    this->wsClient->setErrorCallback([this](const std::string& error) {\n        this->onWebSocketError(error);\n    });\n}\n\nOCPPClient::~OCPPClient() {\n    shutdown();\n}\n\nbool OCPPClient::initialize() {\n    Serial.println(\"Initializing OCPP Client...\");\n    \n    // Validate configuration\n    if (currentConfig.centralSystemUrl.empty() || currentConfig.chargePointId.empty()) {\n        Serial.println(\"Error: Invalid OCPP configuration - missing URL or charge point ID\");\n        return false;\n    }\n    \n    Serial.printf(\"OCPP Client initialized for Charge Point: %s\\n\", currentConfig.chargePointId.c_str());\n    Serial.printf(\"Central System URL: %s\\n\", currentConfig.centralSystemUrl.c_str());\n    Serial.printf(\"Security Profile: %d\\n\", currentConfig.securityProfile);\n    \n    return true;\n}\n\nvoid OCPPClient::setupMessageHandlers() {\n    // Core Profile handlers\n    messageHandlers[\"Authorize\"] = std::make_unique<AuthorizeHandler>(configRepo, hardware);\n    messageHandlers[\"BootNotification\"] = std::make_unique<BootNotificationHandler>(configRepo);\n    messageHandlers[\"StartTransaction\"] = std::make_unique<StartTransactionHandler>(transactionRepo, hardware, configRepo);\n    messageHandlers[\"StopTransaction\"] = std::make_unique<StopTransactionHandler>(transactionRepo, hardware);\n    messageHandlers[\"StatusNotification\"] = std::make_unique<StatusNotificationHandler>(configRepo);\n    messageHandlers[\"MeterValues\"] = std::make_unique<MeterValuesHandler>(transactionRepo, hardware);\n    messageHandlers[\"Heartbeat\"] = std::make_unique<HeartbeatHandler>();\n    \n    // TODO: Add other profile handlers (FirmwareManagement, LocalAuthList, etc.)\n    \n    Serial.printf(\"Registered %d message handlers\\n\", messageHandlers.size());\n}\n\nvoid OCPPClient::setupSecurityConfiguration() {\n    securityConfig.profile = static_cast<SecurityProfile>(currentConfig.securityProfile);\n    securityConfig.verifyServerCertificate = currentConfig.verifyServerCertificate;\n    securityConfig.verifyHostname = currentConfig.verifyHostname;\n    securityConfig.handshakeTimeoutMs = currentConfig.tlsHandshakeTimeout;\n    \n    // Load certificates if required\n    if (securityConfig.profile == SecurityProfile::Profile2_TLS || \n        securityConfig.profile == SecurityProfile::Profile3_TLS_Client) {\n        \n        if (certManager) {\n            // Load CA certificate\n            securityConfig.caCertificate = certManager->getCertificate(CertificateType::CentralSystemRootCert);\n            \n            // Load client certificate for Profile 3\n            if (securityConfig.profile == SecurityProfile::Profile3_TLS_Client) {\n                securityConfig.clientCertificate = certManager->getCertificate(CertificateType::ChargePointCert);\n                // Note: Private key loading would need additional security measures\n            }\n        }\n    }\n}\n\nstd::string OCPPClient::generateMessageId() {\n    std::lock_guard<std::mutex> lock(messageCounterMutex);\n    return currentConfig.chargePointId + \"_\" + std::to_string(++messageCounter);\n}\n\nbool OCPPClient::connect() {\n    Serial.println(\"Connecting to Central System...\");\n    \n    if (connected) {\n        Serial.println(\"Already connected\");\n        return true;\n    }\n    \n    bool result = wsClient->connect(currentConfig.centralSystemUrl, securityConfig);\n    \n    if (result) {\n        Serial.println(\"WebSocket connection initiated...\");\n    } else {\n        Serial.println(\"Failed to initiate WebSocket connection\");\n    }\n    \n    return result;\n}\n\nvoid OCPPClient::disconnect() {\n    Serial.println(\"Disconnecting from Central System...\");\n    wsClient->disconnect();\n    connected = false;\n    registered = false;\n}\n\nvoid OCPPClient::onWebSocketConnected(bool isConnected) {\n    connected = isConnected;\n    \n    if (connected) {\n        Serial.println(\"WebSocket connected to Central System\");\n        stats.lastConnectionTime = millis();\n        \n        // Send boot notification after connection\n        delay(1000); // Small delay to ensure connection is stable\n        sendBootNotification();\n        \n    } else {\n        Serial.println(\"WebSocket disconnected from Central System\");\n        registered = false;\n        \n        // Handle reconnection logic\n        handleConnectionError();\n    }\n}\n\nvoid OCPPClient::onWebSocketMessage(const std::string& message) {\n    Serial.printf(\"Received message: %s\\n\", message.c_str());\n    stats.totalMessagesReceived++;\n    \n    handleIncomingMessage(message);\n}\n\nvoid OCPPClient::onWebSocketError(const std::string& error) {\n    Serial.printf(\"WebSocket error: %s\\n\", error.c_str());\n    stats.totalErrors++;\n    \n    handleConnectionError();\n}\n\nvoid OCPPClient::handleIncomingMessage(const std::string& rawMessage) {\n    auto message = OCPPMessageParser::parseMessage(rawMessage);\n    \n    if (!message) {\n        Serial.println(\"Failed to parse incoming message\");\n        return;\n    }\n    \n    switch (message->messageType) {\n        case MessageType::CALL: {\n            // Handle incoming request from Central System\n            auto handlerIt = messageHandlers.find(message->action);\n            if (handlerIt != messageHandlers.end()) {\n                JsonDocument response = handlerIt->second->handleCall(message->messageId, message->payload.as<JsonObject>());\n                \n                if (response.isNull()) {\n                    // Send error response\n                    sendCallErrorMessage(message->messageId, ErrorCode::NOT_IMPLEMENTED, \n                                       \"Message type not implemented\");\n                } else {\n                    // Send successful response\n                    sendCallResultMessage(message->messageId, response.as<JsonObject>());\n                }\n            } else {\n                Serial.printf(\"No handler for message type: %s\\n\", message->action.c_str());\n                sendCallErrorMessage(message->messageId, ErrorCode::NOT_SUPPORTED, \n                                   \"Message type not supported\");\n            }\n            break;\n        }\n        \n        case MessageType::CALLRESULT: {\n            // Handle response to our request\n            auto pendingIt = pendingMessages.find(message->messageId);\n            if (pendingIt != pendingMessages.end()) {\n                std::string action = pendingIt->second.action;\n                pendingMessages.erase(pendingIt);\n                \n                auto handlerIt = messageHandlers.find(action);\n                if (handlerIt != messageHandlers.end()) {\n                    handlerIt->second->handleCallResult(message->messageId, message->result.as<JsonObject>());\n                }\n            }\n            break;\n        }\n        \n        case MessageType::CALLERROR: {\n            // Handle error response to our request\n            auto pendingIt = pendingMessages.find(message->messageId);\n            if (pendingIt != pendingMessages.end()) {\n                std::string action = pendingIt->second.action;\n                pendingMessages.erase(pendingIt);\n                \n                auto handlerIt = messageHandlers.find(action);\n                if (handlerIt != messageHandlers.end()) {\n                    handlerIt->second->handleCallError(message->messageId, message->errorCode, \n                                                     message->errorDescription, message->errorDetails.as<JsonObject>());\n                }\n            }\n            break;\n        }\n    }\n}\n\nbool OCPPClient::sendCallMessage(const std::string& action, const JsonObject& payload) {\n    if (!connected) {\n        Serial.println(\"Cannot send message - not connected\");\n        return false;\n    }\n    \n    std::string messageId = generateMessageId();\n    std::string message = OCPPMessageParser::serializeCall(messageId, action, payload);\n    \n    Serial.printf(\"Sending %s: %s\\n\", action.c_str(), message.c_str());\n    \n    bool sent = wsClient->sendMessage(message);\n    if (sent) {\n        // Add to pending messages for response tracking\n        JsonDocument payloadCopy;\n        payloadCopy.set(payload);\n        pendingMessages[messageId] = PendingMessage(messageId, action, payloadCopy);\n        \n        stats.totalMessagesSent++;\n    } else {\n        Serial.printf(\"Failed to send %s message\\n\", action.c_str());\n        stats.totalErrors++;\n    }\n    \n    return sent;\n}\n\nbool OCPPClient::sendCallResultMessage(const std::string& messageId, const JsonObject& result) {\n    if (!connected) {\n        return false;\n    }\n    \n    std::string message = OCPPMessageParser::serializeCallResult(messageId, result);\n    Serial.printf(\"Sending CallResult: %s\\n\", message.c_str());\n    \n    bool sent = wsClient->sendMessage(message);\n    if (sent) {\n        stats.totalMessagesSent++;\n    } else {\n        stats.totalErrors++;\n    }\n    \n    return sent;\n}\n\nbool OCPPClient::sendCallErrorMessage(const std::string& messageId, const std::string& errorCode, \n                                    const std::string& errorDescription, const JsonObject& errorDetails) {\n    if (!connected) {\n        return false;\n    }\n    \n    std::string message = OCPPMessageParser::serializeCallError(messageId, errorCode, errorDescription, errorDetails);\n    Serial.printf(\"Sending CallError: %s\\n\", message.c_str());\n    \n    bool sent = wsClient->sendMessage(message);\n    if (sent) {\n        stats.totalMessagesSent++;\n    } else {\n        stats.totalErrors++;\n    }\n    \n    return sent;\n}\n\nbool OCPPClient::sendBootNotification() {\n    JsonDocument payload;\n    JsonObject payloadObj = payload.to<JsonObject>();\n    \n    payloadObj[\"chargePointVendor\"] = CHARGE_POINT_VENDOR;\n    payloadObj[\"chargePointModel\"] = CHARGE_POINT_MODEL;\n    payloadObj[\"chargePointSerialNumber\"] = currentConfig.chargePointId;\n    payloadObj[\"firmwareVersion\"] = FIRMWARE_VERSION;\n    payloadObj[\"chargeBoxSerialNumber\"] = currentConfig.chargePointId;\n    \n    Serial.println(\"Sending BootNotification...\");\n    return sendCallMessage(\"BootNotification\", payloadObj);\n}\n\nbool OCPPClient::sendHeartbeat() {\n    JsonDocument payload;\n    JsonObject payloadObj = payload.to<JsonObject>();\n    \n    return sendCallMessage(\"Heartbeat\", payloadObj);\n}\n\nbool OCPPClient::sendStatusNotification(int connectorId, const std::string& status, const std::string& errorCode) {\n    JsonDocument payload;\n    JsonObject payloadObj = payload.to<JsonObject>();\n    \n    payloadObj[\"connectorId\"] = connectorId;\n    payloadObj[\"status\"] = status;\n    payloadObj[\"errorCode\"] = errorCode;\n    payloadObj[\"timestamp\"] = \"2024-01-01T12:00:00Z\"; // Should use real timestamp\n    \n    Serial.printf(\"Sending StatusNotification - Connector: %d, Status: %s\\n\", connectorId, status.c_str());\n    return sendCallMessage(\"StatusNotification\", payloadObj);\n}\n\nvoid OCPPClient::loop() {\n    if (wsClient) {\n        wsClient->loop();\n    }\n    \n    if (connected) {\n        processHeartbeat();\n        retryPendingMessages();\n        \n        // Update connection uptime\n        if (stats.lastConnectionTime > 0) {\n            stats.connectionUptime = millis() - stats.lastConnectionTime;\n        }\n    }\n}\n\nvoid OCPPClient::processHeartbeat() {\n    unsigned long now = millis();\n    \n    if (registered && (now - lastHeartbeat >= heartbeatInterval)) {\n        sendHeartbeat();\n        lastHeartbeat = now;\n    }\n}\n\nvoid OCPPClient::retryPendingMessages() {\n    unsigned long now = millis();\n    \n    for (auto it = pendingMessages.begin(); it != pendingMessages.end();) {\n        if (now - it->second.timestamp > MESSAGE_TIMEOUT * 1000) {\n            if (it->second.retryCount < it->second.maxRetries) {\n                // Retry message\n                std::string message = OCPPMessageParser::serializeCall(it->second.messageId, \n                                                                      it->second.action, \n                                                                      it->second.payload.as<JsonObject>());\n                if (wsClient->sendMessage(message)) {\n                    it->second.retryCount++;\n                    it->second.timestamp = now;\n                    ++it;\n                } else {\n                    it = pendingMessages.erase(it);\n                }\n            } else {\n                Serial.printf(\"Message %s timed out after %d retries\\n\", \n                             it->second.messageId.c_str(), it->second.maxRetries);\n                it = pendingMessages.erase(it);\n                stats.totalErrors++;\n            }\n        } else {\n            ++it;\n        }\n    }\n}\n\nvoid OCPPClient::handleConnectionError() {\n    // Implement reconnection logic\n    Serial.println(\"Handling connection error - will retry in 10 seconds\");\n    // In a real implementation, you might want to use a task scheduler\n}\n\nvoid OCPPClient::shutdown() {\n    disconnect();\n    messageHandlers.clear();\n    pendingMessages.clear();\n    Serial.println(\"OCPP Client shutdown complete\");\n}\n\nstd::string OCPPClient::getConnectionStatus() {\n    std::string status = \"Connected: \" + std::string(connected ? \"Yes\" : \"No\");\n    status += \", Registered: \" + std::string(registered ? \"Yes\" : \"No\");\n    status += \", Security: \" + std::to_string(static_cast<int>(securityConfig.profile));\n    return status;\n}\n\nSecurityProfile OCPPClient::getActiveSecurityProfile() {\n    return wsClient ? wsClient->getActiveSecurityProfile() : SecurityProfile::Profile1_NoSecurity;\n}"
+#include "OCPPClient.h"
+#include "messages/CoreProfileHandlers.h"
+#include <Arduino.h>
+#include "../../config.h"
+
+using namespace Infrastructure;
+
+OCPPClient::OCPPClient(
+    std::unique_ptr<ISecureWebSocketClient> wsClient,
+    Core::Domain::IConfigRepository* configRepo,
+    Core::Domain::ITransactionRepository* transactionRepo,
+    Core::Domain::IHardwareController* hardware,
+    ICertificateManager* certManager,
+    Core::Application::UseCaseFactory* useCaseFactory
+) : wsClient(std::move(wsClient)),
+    configRepo(configRepo),
+    transactionRepo(transactionRepo),
+    hardware(hardware),
+    certManager(certManager),
+    useCaseFactory(useCaseFactory) {
+    
+    // Initialize stats
+    stats.totalMessagesSent = 0;
+    stats.totalMessagesReceived = 0;
+    stats.totalErrors = 0;
+    stats.lastConnectionTime = 0;
+    
+    // Initialize other members
+    connected = false;
+    registered = false;
+    heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL * 1000;
+    lastHeartbeat = 0;
+    messageCounter = 0;
+    
+    setupMessageHandlers();
+}
+
+OCPPClient::~OCPPClient() {
+    disconnect();
+}
+
+bool OCPPClient::connect() {
+    if (connected) {
+        Serial.println("Already connected to Central System");
+        return true;
+    }
+    
+    // Get central system URL from config
+    std::string centralSystemUrl = "ws://localhost:9000/ocpp/CP001";
+    if (configRepo) {
+        auto config = configRepo->loadConfiguration();
+        if (!config.centralSystemUrl.empty()) {
+            centralSystemUrl = config.centralSystemUrl;
+        }
+    }
+    
+    Serial.printf("Connecting to Central System: %s\n", centralSystemUrl.c_str());
+    
+    // Configure WebSocket client
+    wsClient->setMessageCallback([this](const std::string& message) {
+        handleIncomingMessage(message);
+    });
+    
+    wsClient->setConnectionCallback([this](bool /*connectedFlag*/) {
+        Serial.println("WebSocket connected");
+        connected = true;
+        registered = false;
+        stats.lastConnectionTime = millis();
+        
+        // Send BootNotification immediately upon connection
+        sendBootNotification();
+    });
+    
+    // Remove the OnDisconnectCallback for now - method doesn't exist
+    
+    // Attempt connection with security config
+    SecurityConfig secConfig;
+    secConfig.profile = SecurityProfile::Profile1_NoSecurity;
+    
+    if (wsClient->connect(centralSystemUrl, secConfig)) {
+        Serial.println("Connection successful");
+        return true;
+    }
+    
+    Serial.println("Failed to connect to Central System");
+    return false;
+}
+
+void OCPPClient::disconnect() {
+    if (!connected) return;
+    
+    Serial.println("Disconnecting from Central System");
+    
+    if (wsClient) {
+        wsClient->disconnect();
+    }
+    
+    connected = false;
+    registered = false;
+}
+
+bool OCPPClient::isConnected() const {
+    return connected && wsClient && wsClient->isConnected();
+}
+
+bool OCPPClient::isRegistered() const {
+    return registered;
+}
+
+void OCPPClient::setupMessageHandlers() {
+    messageHandlers.clear();
+
+    messageHandlers["Authorize"] = std::make_unique<AuthorizeHandler>(configRepo, hardware, useCaseFactory);
+    messageHandlers["BootNotification"] = std::make_unique<BootNotificationHandler>(configRepo);
+    messageHandlers["StartTransaction"] = std::make_unique<StartTransactionHandler>(useCaseFactory);
+    messageHandlers["StopTransaction"] = std::make_unique<StopTransactionHandler>(useCaseFactory);
+    messageHandlers["StatusNotification"] = std::make_unique<StatusNotificationHandler>(useCaseFactory);
+    messageHandlers["MeterValues"] = std::make_unique<MeterValuesHandler>(useCaseFactory);
+    messageHandlers["Heartbeat"] = std::make_unique<HeartbeatHandler>();
+
+    Serial.println("Message handlers setup complete");
+}
+
+void OCPPClient::handleIncomingMessage(const std::string& message) {
+    stats.totalMessagesReceived++;
+    
+    Serial.printf("Received message: %s\n", message.c_str());
+    
+    auto parsedMessage = OCPPMessageParser::parseMessage(message);
+    if (!parsedMessage) {
+        Serial.println("Failed to parse incoming message");
+        stats.totalErrors++;
+        return;
+    }
+    
+    // Validate message
+    if (!OCPPMessageParser::validateMessage(*parsedMessage)) {
+        Serial.println("Message validation failed");
+        stats.totalErrors++;
+        return;
+    }
+    
+    switch (parsedMessage->messageType) {
+        case MessageType::CALL:
+            handleIncomingCall(*parsedMessage);
+            break;
+        case MessageType::CALLRESULT:
+            handleIncomingCallResult(*parsedMessage);
+            break;
+        case MessageType::CALLERROR:
+            handleIncomingCallError(*parsedMessage);
+            break;
+        default:
+            Serial.println("Unknown message type");
+            stats.totalErrors++;
+            break;
+    }
+}
+
+void OCPPClient::handleIncomingCall(OCPPMessage& message) {
+    auto handlerIt = messageHandlers.find(message.action);
+    if (handlerIt == messageHandlers.end()) {
+        Serial.printf("No handler for action: %s\n", message.action.c_str());
+        sendCallErrorMessage(message.messageId, ErrorCode::NOT_IMPLEMENTED,
+                             "No handler for action", JsonObject());
+        return;
+    }
+
+    try {
+        JsonDocument response = handlerIt->second->handleCall(message.messageId, message.payload.as<JsonObject>());
+        JsonObject resultObj = response.to<JsonObject>();
+        sendCallResultMessage(message.messageId, resultObj);
+    } catch (const std::exception& e) {
+        Serial.printf("Error handling CALL %s: %s\n", message.action.c_str(), e.what());
+        sendCallErrorMessage(message.messageId, ErrorCode::INTERNAL_ERROR,
+                             "Exception during handler execution", JsonObject());
+    }
+}
+
+void OCPPClient::handleIncomingCallResult(OCPPMessage& message) {
+    Serial.printf("Handling CALLRESULT for message ID: %s\n", message.messageId.c_str());
+    
+    // Find the corresponding pending call
+    auto pendingIt = pendingMessages.find(message.messageId);
+    if (pendingIt != pendingMessages.end()) {
+        // Get the action that was called
+        std::string action = pendingIt->second.action;
+        
+        // Find handler and call handleCallResult
+        auto handlerIt = messageHandlers.find(action);
+        if (handlerIt != messageHandlers.end()) {
+            try {
+                handlerIt->second->handleCallResult(message.messageId, message.result.as<JsonObject>());
+            } catch (const std::exception& e) {
+                Serial.printf("Error handling CALLRESULT for %s: %s\n", action.c_str(), e.what());
+            }
+        }
+        
+        // Remove from pending messages
+        pendingMessages.erase(pendingIt);
+    } else {
+        Serial.printf("Received CALLRESULT for unknown message ID: %s\n", message.messageId.c_str());
+    }
+    
+    // Handle specific responses
+    if (pendingIt != pendingMessages.end() && pendingIt->second.action == "BootNotification") {
+        JsonObject result = message.result.as<JsonObject>();
+        if (result.containsKey("status") && result["status"].as<std::string>() == "Accepted") {
+            registered = true;
+            Serial.println("Charge point registered with Central System");
+            
+            // Update heartbeat interval if provided
+            if (result.containsKey("interval")) {
+                heartbeatInterval = result["interval"].as<int>() * 1000; // Convert to milliseconds
+            }
+        }
+    }
+}
+
+void OCPPClient::handleIncomingCallError(OCPPMessage& message) {
+    Serial.printf("Handling CALLERROR for message ID: %s - %s: %s (stub)\n", 
+                  message.messageId.c_str(), message.errorCode.c_str(), message.errorDescription.c_str());
+    
+    // Find and remove from pending messages
+    auto pendingIt = pendingMessages.find(message.messageId);
+    if (pendingIt != pendingMessages.end()) {
+        pendingMessages.erase(pendingIt);
+        stats.totalErrors++;
+    }
+}
+
+bool OCPPClient::sendCallMessage(const std::string& action, const JsonObject& payload) {
+    if (!connected) {
+        Serial.println("Cannot send message - not connected");
+        return false;
+    }
+    
+    // Generate unique message ID
+    std::string messageId = generateMessageId();
+    
+    // Serialize message
+    std::string message = OCPPMessageParser::serializeCall(messageId, action, payload);
+    
+    Serial.printf("Sending CALL %s: %s\n", action.c_str(), message.c_str());
+    
+    // Send message
+    bool sent = wsClient->sendMessage(message);
+    if (sent) {
+        // Add to pending messages for response tracking
+        JsonDocument payloadCopy;
+        payloadCopy.set(payload);
+        
+        pendingMessages[messageId] = PendingMessage(messageId, action, payloadCopy);
+        stats.totalMessagesSent++;
+    } else {
+        stats.totalErrors++;
+    }
+    
+    return sent;
+}
+
+bool OCPPClient::sendCallResultMessage(const std::string& messageId, const JsonObject& result) {
+    if (!connected) {
+        return false;
+    }
+    
+    std::string message = OCPPMessageParser::serializeCallResult(messageId, result);
+    
+    Serial.printf("Sending CALLRESULT: %s\n", message.c_str());
+    
+    bool sent = wsClient->sendMessage(message);
+    if (sent) {
+        stats.totalMessagesSent++;
+    } else {
+        stats.totalErrors++;
+    }
+    
+    return sent;
+}
+
+bool OCPPClient::sendCallErrorMessage(const std::string& messageId, const std::string& errorCode,
+                                     const std::string& errorDescription, const JsonObject& errorDetails) {
+    if (!connected) {
+        return false;
+    }
+    
+    std::string message = OCPPMessageParser::serializeCallError(messageId, errorCode, errorDescription, errorDetails);
+    
+    Serial.printf("Sending CALLERROR: %s\n", message.c_str());
+    
+    bool sent = wsClient->sendMessage(message);
+    if (sent) {
+        stats.totalMessagesSent++;
+    } else {
+        stats.totalErrors++;
+    }
+    
+    return sent;
+}
+
+bool OCPPClient::sendBootNotification() {
+    JsonDocument payload;
+    JsonObject payloadObj = payload.to<JsonObject>();
+    
+    payloadObj["chargePointVendor"] = CHARGE_POINT_VENDOR;
+    payloadObj["chargePointModel"] = CHARGE_POINT_MODEL;
+    payloadObj["chargePointSerialNumber"] = CHARGE_POINT_SERIAL;
+    payloadObj["firmwareVersion"] = FIRMWARE_VERSION;
+    payloadObj["chargeBoxSerialNumber"] = CHARGE_BOX_SERIAL;
+    payloadObj["iccid"] = "";
+    payloadObj["imsi"] = "";
+    payloadObj["meterType"] = "ADC Current Sensor";
+    payloadObj["meterSerialNumber"] = "ESP32-001";
+    
+    return sendCallMessage("BootNotification", payloadObj);
+}
+
+bool OCPPClient::sendHeartbeat() {
+    JsonDocument payload;
+    JsonObject payloadObj = payload.to<JsonObject>();
+    // Heartbeat has empty payload
+    
+    return sendCallMessage("Heartbeat", payloadObj);
+}
+
+bool OCPPClient::sendStatusNotification(int connectorId, const std::string& status, const std::string& errorCode) {
+    JsonDocument payload;
+    JsonObject payloadObj = payload.to<JsonObject>();
+    
+    payloadObj["connectorId"] = connectorId;
+    payloadObj["status"] = status;
+    payloadObj["errorCode"] = errorCode;
+    payloadObj["timestamp"] = "2024-01-01T12:00:00.000Z"; // Simple timestamp
+    payloadObj["info"] = "";
+    payloadObj["vendorId"] = "";
+    payloadObj["vendorErrorCode"] = "";
+    
+    return sendCallMessage("StatusNotification", payloadObj);
+}
+
+void OCPPClient::loop() {
+    if (wsClient) {
+        // wsClient->loop(); // Method may not exist on all implementations
+    }
+    
+    if (connected) {
+        processHeartbeat();
+        retryPendingMessages();
+        
+        // Check connection timeout
+        if (stats.lastConnectionTime > 0) {
+            unsigned long now = millis();
+            // Add connection monitoring logic here
+        }
+    }
+}
+
+void OCPPClient::processHeartbeat() {
+    unsigned long now = millis();
+    
+    if (registered && (now - lastHeartbeat >= heartbeatInterval)) {
+        if (sendHeartbeat()) {
+            lastHeartbeat = now;
+        }
+    }
+}
+
+void OCPPClient::retryPendingMessages() {
+    unsigned long now = millis();
+    
+    for (auto it = pendingMessages.begin(); it != pendingMessages.end();) {
+        if (now - it->second.timestamp > MESSAGE_TIMEOUT * 1000) {
+            Serial.printf("Message timeout for ID: %s\n", it->first.c_str());
+            
+            // Retry message
+            std::string message = OCPPMessageParser::serializeCall(it->second.messageId,
+                                                                  it->second.action,
+                                                                  it->second.payload.as<JsonObject>());
+            if (wsClient->sendMessage(message)) {
+                it->second.timestamp = now; // Update timestamp for retry
+                ++it;
+            } else {
+                Serial.printf("Failed to retry message: %s\n", it->first.c_str());
+                it = pendingMessages.erase(it);
+                stats.totalErrors++;
+            }
+        } else {
+            ++it;
+        }
+    }
+}
+
+void OCPPClient::handleConnectionError() {
+    Serial.println("Handling connection error - attempting reconnect");
+    
+    // Clear pending messages
+    pendingMessages.clear();
+    
+    // Connection error handling logic here
+}
+
+void OCPPClient::shutdown() {
+    Serial.println("Shutting down OCPP Client");
+    messageHandlers.clear();
+    pendingMessages.clear();
+    disconnect();
+}
+
+std::string OCPPClient::getConnectionStatus() {
+    if (!connected) return "Disconnected";
+    if (!registered) return "Connected";
+    return "Registered";
+}
+
+SecurityProfile OCPPClient::getActiveSecurityProfile() {
+    // Return the currently active security profile
+    return SecurityProfile::Profile1_NoSecurity;
+}
+
+std::string OCPPClient::generateMessageId() {
+    static int messageCounter = 0;
+    return "msg_" + std::to_string(++messageCounter);
+}

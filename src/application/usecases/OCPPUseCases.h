@@ -115,8 +115,8 @@ namespace Application {
         Domain::IHardwareController* hardware;
         Domain::ITransactionRepository* transactionRepo;
         
-        std::vector<MeterValuesCommand::MeterValueData> collectMeterValues(int connectorId);
-        bool validateMeterValues(const std::vector<MeterValuesCommand::MeterValueData>& values);
+        std::vector<MeterValueData> collectMeterValues(int connectorId);
+        bool validateMeterValues(const std::vector<MeterValueData>& values);
         
     public:
         MeterValuesUseCase(

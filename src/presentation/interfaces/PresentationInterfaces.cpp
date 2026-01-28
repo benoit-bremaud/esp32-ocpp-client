@@ -209,148 +209,101 @@ void WebInterface::handleTransactionStop(AsyncWebServerRequest* request) {
 }
 
 String WebInterface::generateDashboardHTML(const SystemStatus& status) {
-    String html = R"html(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ESP32 OCPP Charging Station</title>
-    <link rel="stylesheet" href="/style.css">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>ESP32 OCPP Charging Station</h1>
-            <div class="status-bar">
-                <span class="status-item">ID: )html" + status.chargePointId + R"html(</span>
-                <span class="status-item">FW: )html" + status.firmwareVersion + R"html(</span>
-                <span class="status-item">Uptime: )html" + status.uptime + R"html(</span>
-            </div>
-        </header>
-        
-        <nav>
-            <a href="/dashboard" class="active">Dashboard</a>
-            <a href="/config">Configuration</a>
-            <a href="/transactions">Transactions</a>
-            <a href="/diagnostics">Diagnostics</a>
-        </nav>
-        
-        <main>
-            <div class="card-grid">
-                <div class="card">
-                    <h3>System Status</h3>
-                    <div class="status-grid">
-                        <div class="status-item">
-                            <label>Network:</label>
-                            <span class=")html" + (status.network.wifiConnected ? String("connected") : String("disconnected")) + R"html(">
-                                )html" + (status.network.wifiConnected ? String("Connected") : String("Disconnected")) + R"html(
-                            </span>
-                        </div>
-                        <div class="status-item">
-                            <label>OCPP:</label>
-                            <span class=")html" + (status.network.ocppConnected ? String("connected") : String("disconnected")) + R"html(">
-                                )html" + (status.network.ocppConnected ? String("Connected") : String("Disconnected")) + R"html(
-                            </span>
-                        </div>
-                        <div class="status-item">
-                            <label>Emergency Stop:</label>
-                            <span class=")html" + (status.hardware.emergencyStop ? String("fault") : String("ok")) + R"html(">
-                                )html" + (status.hardware.emergencyStop ? String("ACTIVE") : String("OK")) + R"html(
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3>Connectors</h3>
-                    <div class="connector-grid">)html";
-    
+    String html;
+    html.reserve(4096);
+
+    html += F("<!DOCTYPE html><html><head>");
+    html += F("<title>ESP32 OCPP Charging Station</title>");
+    html += F("<link rel=\"stylesheet\" href=\"/style.css\">");
+    html += F("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+    html += F("</head><body><div class=\"container\">");
+
+    // Header
+    html += F("<header><h1>ESP32 OCPP Charging Station</h1><div class=\"status-bar\">");
+    html += F("<span class=\"status-item\">ID: ");
+    html += status.chargePointId.c_str();
+    html += F("</span>");
+    html += F("<span class=\"status-item\">FW: ");
+    html += status.firmwareVersion.c_str();
+    html += F("</span>");
+    html += F("<span class=\"status-item\">Uptime: ");
+    html += status.uptime.c_str();
+    html += F("</span></div></header>");
+
+    // Navigation
+    html += F("<nav>");
+    html += F("<a href=\"/dashboard\" class=\"active\">Dashboard</a>");
+    html += F("<a href=\"/config\">Configuration</a>");
+    html += F("<a href=\"/transactions\">Transactions</a>");
+    html += F("<a href=\"/diagnostics\">Diagnostics</a>");
+    html += F("</nav>");
+
+    // System status
+    html += F("<main><div class=\"card-grid\"><div class=\"card\"><h3>System Status</h3><div class=\"status-grid\">");
+
+    // Network
+    html += F("<div class=\"status-item\"><label>Network:</label><span class=\"");
+    html += status.network.wifiConnected ? F("connected") : F("disconnected");
+    html += F("\">");
+    html += status.network.wifiConnected ? F("Connected") : F("Disconnected");
+    html += F("</span></div>");
+
+    // OCPP
+    html += F("<div class=\"status-item\"><label>OCPP:</label><span class=\"");
+    html += status.network.ocppConnected ? F("connected") : F("disconnected");
+    html += F("\">");
+    html += status.network.ocppConnected ? F("Connected") : F("Disconnected");
+    html += F("</span></div>");
+
+    // Emergency stop
+    html += F("<div class=\"status-item\"><label>Emergency Stop:</label><span class=\"");
+    html += status.hardware.emergencyStop ? F("fault") : F("ok");
+    html += F("\">");
+    html += status.hardware.emergencyStop ? F("ACTIVE") : F("OK");
+    html += F("</span></div>");
+
+    html += F("</div></div>");
+
+    // Connectors card
+    html += F("<div class=\"card\"><h3>Connectors</h3><div class=\"connector-grid\">");
+
     for (const auto& connector : status.connectors) {
-        html += R"html(
-                        <div class="connector-card">
-                            <h4>Connector )html" + String(connector.connectorId) + R"html(</h4>
-                            <div class="connector-status )html" + connector.status + R"html(">
-                                )html" + connector.status + R"html(
-                            </div>
-                            <div class="connector-actions">
-                                <button onclick="startTransaction()html" + String(connector.connectorId) + R"html()" 
-                                        )html" + (connector.charging ? String("disabled") : String("")) + R"html(>
-                                    Start
-                                </button>
-                                <button onclick="stopTransaction()html" + String(connector.currentTransactionId) + R"html()"
-                                        )html" + (!connector.charging ? String("disabled") : String("")) + R"html(>
-                                    Stop
-                                </button>
-                            </div>
-                        </div>)html";
+        html += F("<div class=\"connector-card\">");
+        html += F("<h4>Connector ");
+        html += String(connector.connectorId);
+        html += F("</h4>");
+
+        html += F("<div class=\"connector-status ");
+        html += connector.status.c_str();
+        html += F("\">");
+        html += connector.status.c_str();
+        html += F("</div>");
+
+        html += F("<div class=\"connector-actions\">");
+        html += F("<button onclick=\"startTransaction(");
+        html += String(connector.connectorId);
+        html += F(")\"");
+        if (connector.charging) {
+            html += F(" disabled");
+        }
+        html += F(">Start</button>");
+
+        html += F("<button onclick=\"stopTransaction(");
+        html += String(connector.currentTransactionId);
+        html += F(")\"");
+        if (!connector.charging) {
+            html += F(" disabled");
+        }
+        html += F(">Stop</button>");
+        html += F("</div></div>");
     }
-    
-    html += R"html(
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-    
-    <script src="/script.js"></script>
-    <script>
-        // WebSocket connection for real-time updates
-        const ws = new WebSocket('ws://' + window.location.host + '/ws');
-        
-        ws.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'status_update') {
-                updateDashboard(data.status);
-            }
-        };
-        
-        function updateDashboard(status) {
-            // Update dashboard with real-time data
-            location.reload(); // Simple implementation
-        }
-        
-        function startTransaction(connectorId) {
-            const idTag = prompt("Enter ID Tag:");
-            if (idTag) {
-                fetch('/api/start', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `idTag=${idTag}&connectorId=${connectorId}`
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        alert('Transaction started: ' + data.transactionId);
-                        location.reload();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                });
-            }
-        }
-        
-        function stopTransaction(transactionId) {
-            if (confirm('Stop transaction ' + transactionId + '?')) {
-                fetch('/api/stop', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `transactionId=${transactionId}`
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        alert('Transaction stopped');
-                        location.reload();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                });
-            }
-        }
-    </script>
-</body>
-</html>)html";
-    
+
+    html += F("</div></div></div></main>");
+
+    // Simple footer and script hook (actual JS served from /script.js)
+    html += F("<script src=\"/script.js\"></script>");
+    html += F("</div></body></html>");
+
     return html;
 }
 

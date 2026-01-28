@@ -71,23 +71,28 @@ namespace Application {
     };
     
     /**
-     * @brief Command for meter values reporting
+     * @brief Meter value data structure
+     */
+    struct MeterValueData {
+        std::string value;
+        std::string context = "Sample.Periodic";
+        std::string format = "Raw";
+        std::string measurand = "Energy.Active.Import.Register";
+        std::string phase = "";
+        std::string location = "Outlet";
+        std::string unit = "Wh";
+        
+        MeterValueData(const std::string& val = "0") : value(val) {}
+    };
+    
+    /**
+     * @brief Meter values command for sending meter data
      */
     struct MeterValuesCommand {
         int connectorId;
         int transactionId = 0;
         std::string timestamp;
-        std::vector<struct MeterValueData> meterValues;
-        
-        struct MeterValueData {
-            std::string value;
-            std::string context = "Sample.Periodic";
-            std::string format = "Raw";
-            std::string measurand = "Energy.Active.Import.Register";
-            std::string phase = "";
-            std::string location = "Outlet";
-            std::string unit = "Wh";
-        };
+        std::vector<MeterValueData> meterValues;
         
         MeterValuesCommand(int connector) : connectorId(connector) {}
     };
@@ -168,6 +173,7 @@ namespace Application {
         std::string expiryDate = "";
         bool authorized;
         
+        AuthorizationResult() : status("Unknown"), authorized(false) {}
         AuthorizationResult(const std::string& st, bool auth) 
             : status(st), authorized(auth) {}
     };
@@ -185,7 +191,8 @@ namespace Application {
         bool charging;
         int currentTransactionId = 0;
         
-        ConnectorStatus(int id) : connectorId(id), available(true), charging(false) {}
+        ConnectorStatus() : connectorId(0), status("Unknown"), errorCode("NoError"), available(false), charging(false) {}
+        ConnectorStatus(int id) : connectorId(id), status("Available"), errorCode("NoError"), available(true), charging(false) {}
     };
     
     /**

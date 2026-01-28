@@ -2,6 +2,8 @@
 
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <map>
+#include <memory>
 #include "../../application/services/ApplicationServices.h"
 #include "../../application/dto/ApplicationDTO.h"
 
@@ -21,8 +23,7 @@ namespace Presentation {
         AsyncWebServer* server;
         Application::ChargingStationApplication* application;
         
-        // Web server configuration
-        static const int WEB_SERVER_PORT = 80;
+        // Web server configuration (port value comes from build-time define WEB_SERVER_PORT)
         static const char* ADMIN_USERNAME;
         static const char* ADMIN_PASSWORD;
         
@@ -232,5 +233,48 @@ namespace Presentation {
      * @brief Main presentation layer coordinator
      */
     class PresentationManager {
-    private:\n        Application::ChargingStationApplication* application;
-        \n        // Presentation interfaces\n        std::unique_ptr<WebInterface> webInterface;\n        std::unique_ptr<SerialInterface> serialInterface;\n        std::unique_ptr<LEDInterface> ledInterface;\n        \n        // Configuration\n        bool webEnabled = true;\n        bool serialEnabled = true;\n        bool ledEnabled = true;\n        \n        // Event subscription\n        bool eventsSubscribed = false;\n        \n    public:\n        PresentationManager(Application::ChargingStationApplication* app);\n        ~PresentationManager();\n        \n        // Lifecycle\n        bool initialize();\n        void shutdown();\n        void loop(); // Main presentation loop\n        \n        // Interface access\n        WebInterface* getWebInterface() { return webInterface.get(); }\n        SerialInterface* getSerialInterface() { return serialInterface.get(); }\n        LEDInterface* getLEDInterface() { return ledInterface.get(); }\n        \n        // Configuration\n        void enableWeb(bool enable) { webEnabled = enable; }\n        void enableSerial(bool enable) { serialEnabled = enable; }\n        void enableLED(bool enable) { ledEnabled = enable; }\n        \n        // Event handling\n        void handleSystemEvent(const Application::SystemEvent& event);\n        void subscribeToEvents();\n        void unsubscribeFromEvents();\n        \n        // Factory method\n        static std::unique_ptr<PresentationManager> create(\n            Application::ChargingStationApplication* app);\n    };\n}"
+    private:
+        Application::ChargingStationApplication* application;
+        
+        // Presentation interfaces
+        std::unique_ptr<WebInterface> webInterface;
+        std::unique_ptr<SerialInterface> serialInterface;
+        std::unique_ptr<LEDInterface> ledInterface;
+        
+        // Configuration
+        bool webEnabled = true;
+        bool serialEnabled = true;
+        bool ledEnabled = true;
+        
+        // Event subscription
+        bool eventsSubscribed = false;
+        
+    public:
+        PresentationManager(Application::ChargingStationApplication* app);
+        ~PresentationManager();
+        
+        // Lifecycle
+        bool initialize();
+        void shutdown();
+        void loop(); // Main presentation loop
+        
+        // Interface access
+        WebInterface* getWebInterface() { return webInterface.get(); }
+        SerialInterface* getSerialInterface() { return serialInterface.get(); }
+        LEDInterface* getLEDInterface() { return ledInterface.get(); }
+        
+        // Configuration
+        void enableWeb(bool enable) { webEnabled = enable; }
+        void enableSerial(bool enable) { serialEnabled = enable; }
+        void enableLED(bool enable) { ledEnabled = enable; }
+        
+        // Event handling
+        void handleSystemEvent(const Application::SystemEvent& event);
+        void subscribeToEvents();
+        void unsubscribeFromEvents();
+        
+        // Factory method
+        static std::unique_ptr<PresentationManager> create(
+            Application::ChargingStationApplication* app);
+    };
+}

@@ -18,6 +18,36 @@
 #define SERIAL_SPEED 115200
 #endif
 
+// OCPP Configuration
+#ifndef CHARGE_POINT_SERIAL
+#define CHARGE_POINT_SERIAL "ESP32_OCPP_001"
+#endif
+
+#ifndef CHARGE_BOX_SERIAL
+#define CHARGE_BOX_SERIAL "ESP32_CB_001"
+#endif
+
+#ifndef DEFAULT_HEARTBEAT_INTERVAL
+#define DEFAULT_HEARTBEAT_INTERVAL 300
+#endif
+
+#ifndef MAX_PENDING_MESSAGES
+#define MAX_PENDING_MESSAGES 100
+#endif
+
+// Charge point information
+#ifndef CHARGE_POINT_VENDOR
+#define CHARGE_POINT_VENDOR "ESP32_VENDOR"
+#endif
+
+#ifndef CHARGE_POINT_MODEL
+#define CHARGE_POINT_MODEL "ESP32_OCPP_CLIENT"
+#endif
+
+#ifndef MESSAGE_TIMEOUT
+#define MESSAGE_TIMEOUT 30
+#endif
+
 // Hardware pin definitions
 namespace HardwarePins {
     // Status LEDs
