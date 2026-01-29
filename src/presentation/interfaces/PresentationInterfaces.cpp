@@ -673,7 +673,7 @@ void SerialInterface::loop() {
     if (Serial.available()) {
         char c = Serial.read();
         
-        if (c == '\\n' || c == '\\r') {
+        if (c == '\n' || c == '\r') {
             if (currentCommand.length() > 0) {
                 auto args = parseCommand(currentCommand);
                 if (args.size() > 0) {
@@ -705,7 +705,7 @@ void SerialInterface::loop() {
                 currentCommand = "";
                 Serial.print("> ");
             }
-        } else if (c == '\\b' || c == 127) { // Backspace
+        } else if (c == '\b' || c == 127) { // Backspace
             if (currentCommand.length() > 0) {
                 currentCommand.remove(currentCommand.length() - 1);
                 if (echoEnabled) {
