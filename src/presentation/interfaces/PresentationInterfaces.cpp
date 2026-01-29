@@ -149,9 +149,9 @@ void WebInterface::handleApiSystemStatus(AsyncWebServerRequest* request) {
     json["hardware"]["emergencyStop"] = status.hardware.emergencyStop;
     json["hardware"]["rfidConnected"] = status.hardware.rfidReaderConnected;
     
-    JsonArray connectors = json.createNestedArray("connectors");
+    JsonArray connectors = json["connectors"].to<JsonArray>();
     for (const auto& connector : status.connectors) {
-        JsonObject connectorObj = connectors.createNestedObject();
+        JsonObject connectorObj = connectors.add<JsonObject>();
         connectorObj["id"] = connector.connectorId;
         connectorObj["status"] = connector.status;
         connectorObj["available"] = connector.available;

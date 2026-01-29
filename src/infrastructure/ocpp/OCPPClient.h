@@ -5,7 +5,6 @@
 #include "SecurityProfiles.h"
 #include "websocket/ArduinoWebSocketClient.h"
 #include "../../../core/domain/entities/Configuration.h"
-#include "../../../core/domain/entities/MeterValue.h"
 #include "../../../core/domain/ports/IConfigRepository.h"
 #include "../../../core/domain/ports/IHardwareController.h"
 #include "../../../core/domain/ports/ITransactionRepository.h"
@@ -59,6 +58,10 @@ namespace Infrastructure {
         bool registered = false;
         unsigned long lastHeartbeat = 0;
         unsigned long heartbeatInterval = 300000; // 5 minutes default
+        unsigned long lastReconnectAttempt = 0;
+        unsigned long reconnectDelayMs = 0;
+        unsigned long reconnectDelayInitialMs = 0;
+        unsigned long reconnectDelayMaxMs = 0;
         
         // Message ID generation
         int messageCounter = 0;
@@ -80,6 +83,7 @@ namespace Infrastructure {
         void handleIncomingCallError(OCPPMessage& message);
         void processHeartbeat();
         void retryPendingMessages();
+        void attemptReconnect();
         
         // Connection callbacks
         void onWebSocketConnected(bool connected);
@@ -102,8 +106,6 @@ namespace Infrastructure {
         
         ~OCPPClient();
         
-        // Lifecycle management
-        bool initialize();
         void loop(); // Must be called regularly in main loop
         void shutdown();
         
@@ -118,34 +120,13 @@ namespace Infrastructure {
         bool sendHeartbeat();
         bool sendStatusNotification(int connectorId, const std::string& status, 
                                   const std::string& errorCode = "NoError");
-        bool sendAuthorize(const std::string& idTag);
-        bool sendStartTransaction(int connectorId, const std::string& idTag, int meterStart, 
-                                const std::string& timestamp = "");
-        bool sendStopTransaction(int transactionId, int meterStop, 
-                               const std::string& reason = "Local", const std::string& timestamp = "");
-        bool sendMeterValues(int connectorId, const std::vector<Core::Domain::MeterValue>& meterValues);
-        
-        // Data Transfer (for custom messages)
-        bool sendDataTransfer(const std::string& vendorId, const std::string& messageId = "", 
-                            const JsonObject& data = JsonObject());
         
         // Status and diagnostics
         std::string getConnectionStatus();
         SecurityProfile getActiveSecurityProfile();
-        std::map<std::string, std::string> getDiagnosticInfo();
-        
-        // Configuration management
-        bool updateConfiguration(const Core::Domain::Configuration& config);
-        Core::Domain::Configuration getConfiguration() const { return currentConfig; }
-        
-        // Transaction management
-        std::vector<Core::Domain::Transaction> getActiveTransactions();
-        bool hasActiveTransaction(int connectorId);
-        
+
         // Error handling and recovery
         void handleConnectionError();
-        void retryFailedMessages();
-        void clearMessageQueue();
         
         // Statistics
         struct Statistics {

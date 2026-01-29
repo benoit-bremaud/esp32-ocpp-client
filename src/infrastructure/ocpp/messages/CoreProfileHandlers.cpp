@@ -21,7 +21,7 @@ using Core::Application::UseCaseFactory;
 JsonDocument AuthorizeHandler::handleCall(const std::string& /*messageId*/, const JsonObject& payload) {
     JsonDocument response;
 
-    if (!payload.containsKey("idTag")) {
+    if (payload["idTag"].isNull()) {
         Serial.println("Authorize: missing idTag");
         return response;
     }
@@ -56,7 +56,7 @@ JsonDocument AuthorizeHandler::handleCall(const std::string& /*messageId*/, cons
 void AuthorizeHandler::handleCallResult(const std::string& messageId, const JsonObject& payload) {
     Serial.printf("Authorize CallResult received for messageId: %s\n", messageId.c_str());
 
-    if (payload.containsKey("idTagInfo")) {
+    if (!payload["idTagInfo"].isNull()) {
         std::string status = payload["idTagInfo"]["status"].as<std::string>();
         Serial.printf("Authorization status: %s\n", status.c_str());
     }
@@ -84,7 +84,7 @@ JsonDocument BootNotificationHandler::handleCall(const std::string& /*messageId*
 void BootNotificationHandler::handleCallResult(const std::string& messageId, const JsonObject& payload) {
     Serial.printf("BootNotification CallResult: %s\n", messageId.c_str());
 
-    if (payload.containsKey("status")) {
+    if (!payload["status"].isNull()) {
         std::string status = payload["status"].as<std::string>();
         Serial.printf("Boot status: %s\n", status.c_str());
     }
@@ -101,9 +101,9 @@ void BootNotificationHandler::handleCallError(const std::string& messageId,
 JsonDocument StartTransactionHandler::handleCall(const std::string& /*messageId*/, const JsonObject& payload) {
     JsonDocument response;
 
-    if (!payload.containsKey("connectorId") ||
-        !payload.containsKey("idTag") ||
-        !payload.containsKey("meterStart")) {
+    if (payload["connectorId"].isNull() ||
+        payload["idTag"].isNull() ||
+        payload["meterStart"].isNull()) {
         Serial.println("StartTransaction: missing required fields");
         return response;
     }
@@ -117,7 +117,7 @@ JsonDocument StartTransactionHandler::handleCall(const std::string& /*messageId*
     cmd.connectorId = payload["connectorId"].as<int>();
     cmd.idTag = payload["idTag"].as<std::string>();
     cmd.meterStart = payload["meterStart"].as<int>();
-    if (payload.containsKey("timestamp")) {
+    if (!payload["timestamp"].isNull()) {
         cmd.timestamp = payload["timestamp"].as<std::string>();
     }
 
@@ -139,7 +139,7 @@ JsonDocument StartTransactionHandler::handleCall(const std::string& /*messageId*
 
 void StartTransactionHandler::handleCallResult(const std::string& messageId, const JsonObject& payload) {
     Serial.printf("StartTransaction CallResult: %s\n", messageId.c_str());
-    if (payload.containsKey("transactionId")) {
+    if (!payload["transactionId"].isNull()) {
         int transactionId = payload["transactionId"].as<int>();
         Serial.printf("Transaction started with ID: %d\n", transactionId);
     }
@@ -156,7 +156,7 @@ void StartTransactionHandler::handleCallError(const std::string& messageId,
 JsonDocument StopTransactionHandler::handleCall(const std::string& /*messageId*/, const JsonObject& payload) {
     JsonDocument response;
 
-    if (!payload.containsKey("transactionId") || !payload.containsKey("meterStop")) {
+    if (payload["transactionId"].isNull() || payload["meterStop"].isNull()) {
         Serial.println("StopTransaction: missing required fields");
         return response;
     }
@@ -169,13 +169,13 @@ JsonDocument StopTransactionHandler::handleCall(const std::string& /*messageId*/
     StopTransactionCommand cmd;
     cmd.transactionId = payload["transactionId"].as<int>();
     cmd.meterStop = payload["meterStop"].as<int>();
-    if (payload.containsKey("idTag")) {
+    if (!payload["idTag"].isNull()) {
         cmd.idTag = payload["idTag"].as<std::string>();
     }
-    if (payload.containsKey("reason")) {
+    if (!payload["reason"].isNull()) {
         cmd.reason = payload["reason"].as<std::string>();
     }
-    if (payload.containsKey("timestamp")) {
+    if (!payload["timestamp"].isNull()) {
         cmd.timestamp = payload["timestamp"].as<std::string>();
     }
 
@@ -196,7 +196,7 @@ JsonDocument StopTransactionHandler::handleCall(const std::string& /*messageId*/
 
 void StopTransactionHandler::handleCallResult(const std::string& messageId, const JsonObject& payload) {
     Serial.printf("StopTransaction CallResult: %s\n", messageId.c_str());
-    if (payload.containsKey("idTagInfo")) {
+    if (!payload["idTagInfo"].isNull()) {
         std::string status = payload["idTagInfo"]["status"].as<std::string>();
         Serial.printf("Stop transaction status: %s\n", status.c_str());
     }
@@ -213,7 +213,7 @@ void StopTransactionHandler::handleCallError(const std::string& messageId,
 JsonDocument StatusNotificationHandler::handleCall(const std::string& /*messageId*/, const JsonObject& payload) {
     JsonDocument response;
 
-    if (!payload.containsKey("connectorId") || !payload.containsKey("status")) {
+    if (payload["connectorId"].isNull() || payload["status"].isNull()) {
         Serial.println("StatusNotification: missing required fields");
         return response;
     }
@@ -226,19 +226,19 @@ JsonDocument StatusNotificationHandler::handleCall(const std::string& /*messageI
     StatusNotificationCommand cmd;
     cmd.connectorId = payload["connectorId"].as<int>();
     cmd.status = payload["status"].as<std::string>();
-    if (payload.containsKey("errorCode")) {
+    if (!payload["errorCode"].isNull()) {
         cmd.errorCode = payload["errorCode"].as<std::string>();
     }
-    if (payload.containsKey("info")) {
+    if (!payload["info"].isNull()) {
         cmd.info = payload["info"].as<std::string>();
     }
-    if (payload.containsKey("timestamp")) {
+    if (!payload["timestamp"].isNull()) {
         cmd.timestamp = payload["timestamp"].as<std::string>();
     }
-    if (payload.containsKey("vendorId")) {
+    if (!payload["vendorId"].isNull()) {
         cmd.vendorId = payload["vendorId"].as<std::string>();
     }
-    if (payload.containsKey("vendorErrorCode")) {
+    if (!payload["vendorErrorCode"].isNull()) {
         cmd.vendorErrorCode = payload["vendorErrorCode"].as<std::string>();
     }
 
@@ -268,7 +268,7 @@ void StatusNotificationHandler::handleCallError(const std::string& messageId,
 JsonDocument MeterValuesHandler::handleCall(const std::string& /*messageId*/, const JsonObject& payload) {
     JsonDocument response;
 
-    if (!payload.containsKey("connectorId")) {
+    if (payload["connectorId"].isNull()) {
         Serial.println("MeterValues: missing connectorId");
         return response;
     }
@@ -279,10 +279,10 @@ JsonDocument MeterValuesHandler::handleCall(const std::string& /*messageId*/, co
     }
 
     MeterValuesCommand cmd(payload["connectorId"].as<int>());
-    if (payload.containsKey("transactionId")) {
+    if (!payload["transactionId"].isNull()) {
         cmd.transactionId = payload["transactionId"].as<int>();
     }
-    if (payload.containsKey("timestamp")) {
+    if (!payload["timestamp"].isNull()) {
         cmd.timestamp = payload["timestamp"].as<std::string>();
     }
 
@@ -318,7 +318,7 @@ JsonDocument HeartbeatHandler::handleCall(const std::string& /*messageId*/, cons
 
 void HeartbeatHandler::handleCallResult(const std::string& messageId, const JsonObject& payload) {
     Serial.printf("Heartbeat CallResult: %s\n", messageId.c_str());
-    if (payload.containsKey("currentTime")) {
+    if (!payload["currentTime"].isNull()) {
         std::string currentTime = payload["currentTime"].as<std::string>();
         Serial.printf("Heartbeat time: %s\n", currentTime.c_str());
     }

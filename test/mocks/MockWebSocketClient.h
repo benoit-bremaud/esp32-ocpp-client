@@ -34,10 +34,12 @@ private:
     bool shouldFailConnection = false;
     bool shouldFailSending = false;
     std::string lastConnectedUrl;
+    int connectAttempts = 0;
     
 public:
     // ISecureWebSocketClient implementation
     bool connect(const std::string& url, const Infrastructure::SecurityConfig& securityConfig) override {
+        ++connectAttempts;
         if (shouldFailConnection) {
             return false;
         }
@@ -184,6 +186,10 @@ public:
     std::string getLastConnectedUrl() const {
         return lastConnectedUrl;
     }
+
+    int getConnectAttempts() const {
+        return connectAttempts;
+    }
     
     Infrastructure::SecurityConfig getCurrentConfig() const {
         return currentConfig;
@@ -194,6 +200,7 @@ public:
         shouldFailConnection = false;
         shouldFailSending = false;
         lastConnectedUrl.clear();
+        connectAttempts = 0;
         clearOutgoingMessages();
         
         while (!incomingMessages.empty()) {

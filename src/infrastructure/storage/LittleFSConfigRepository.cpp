@@ -1,13 +1,8 @@
 #include "LittleFSConfigRepository.h"
 #include "../../../include/config.h"
 #include <ArduinoJson.h>
-#include <algorithm>
 
 namespace Infrastructure {
-
-namespace {
-constexpr size_t kConfigJsonCapacity = 2048;
-}
 
 LittleFSConfigRepository::LittleFSConfigRepository(Core::Domain::IFileSystem* fs, const std::string& path)
     : fileSystem(fs), configPath(path.empty() ? CONFIG_FILE_PATH : path) {}
@@ -17,7 +12,7 @@ bool LittleFSConfigRepository::saveConfiguration(const Core::Domain::Configurati
         return false;
     }
 
-    DynamicJsonDocument doc(kConfigJsonCapacity);
+    JsonDocument doc;
     doc["centralSystemUrl"] = config.centralSystemUrl;
     doc["chargePointId"] = config.chargePointId;
     doc["chargePointPassword"] = config.chargePointPassword;
@@ -38,7 +33,7 @@ bool LittleFSConfigRepository::saveConfiguration(const Core::Domain::Configurati
     doc["verifyHostname"] = config.verifyHostname;
     doc["tlsHandshakeTimeoutMs"] = config.tlsHandshakeTimeoutMs;
 
-    JsonArray cipherSuites = doc.createNestedArray("allowedCipherSuites");
+    JsonArray cipherSuites = doc["allowedCipherSuites"].to<JsonArray>();
     for (const auto& suite : config.allowedCipherSuites) {
         cipherSuites.add(suite);
     }
@@ -69,9 +64,7 @@ Core::Domain::Configuration LittleFSConfigRepository::loadConfiguration() {
         return config;
     }
 
-    size_t capacity = content.size() + 512;
-    capacity = std::max(capacity, kConfigJsonCapacity);
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
     auto err = deserializeJson(doc, content);
     if (err) {
         return config;
@@ -97,7 +90,7 @@ Core::Domain::Configuration LittleFSConfigRepository::loadConfiguration() {
     config.verifyHostname = doc["verifyHostname"] | config.verifyHostname;
     config.tlsHandshakeTimeoutMs = doc["tlsHandshakeTimeoutMs"] | config.tlsHandshakeTimeoutMs;
 
-    if (doc.containsKey("allowedCipherSuites")) {
+    if (doc["allowedCipherSuites"].is<JsonArray>()) {
         config.allowedCipherSuites.clear();
         for (JsonVariant v : doc["allowedCipherSuites"].as<JsonArray>()) {
             config.allowedCipherSuites.push_back(v.as<std::string>());

@@ -1,6 +1,7 @@
 #include "OCPPClient.h"
 #include "messages/CoreProfileHandlers.h"
 #include <Arduino.h>
+#include <algorithm>
 #include "../../config.h"
 
 using namespace Infrastructure;
@@ -31,6 +32,10 @@ OCPPClient::OCPPClient(
     heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL * 1000;
     lastHeartbeat = 0;
     messageCounter = 0;
+    lastReconnectAttempt = 0;
+    reconnectDelayInitialMs = SystemLimits::WEBSOCKET_RECONNECT_INTERVAL_MS;
+    reconnectDelayMs = reconnectDelayInitialMs;
+    reconnectDelayMaxMs = 60000UL;
     
     setupMessageHandlers();
 }
@@ -61,14 +66,29 @@ bool OCPPClient::connect() {
         handleIncomingMessage(message);
     });
     
-    wsClient->setConnectionCallback([this](bool /*connectedFlag*/) {
-        Serial.println("WebSocket connected");
-        connected = true;
+    wsClient->setConnectionCallback([this](bool connectedFlag) {
+        if (connectedFlag) {
+            Serial.println("WebSocket connected");
+            connected = true;
+            registered = false;
+            stats.lastConnectionTime = millis();
+            reconnectDelayMs = reconnectDelayInitialMs;
+            lastReconnectAttempt = stats.lastConnectionTime;
+
+            // Send BootNotification immediately upon connection
+            sendBootNotification();
+        } else {
+            Serial.println("WebSocket disconnected");
+            connected = false;
+            registered = false;
+        }
+    });
+
+    wsClient->setErrorCallback([this](const std::string& error) {
+        Serial.printf("WebSocket error: %s\n", error.c_str());
+        connected = false;
         registered = false;
-        stats.lastConnectionTime = millis();
-        
-        // Send BootNotification immediately upon connection
-        sendBootNotification();
+        handleConnectionError();
     });
     
     // Remove the OnDisconnectCallback for now - method doesn't exist
@@ -205,12 +225,12 @@ void OCPPClient::handleIncomingCallResult(OCPPMessage& message) {
     // Handle specific responses
     if (pendingIt != pendingMessages.end() && pendingIt->second.action == "BootNotification") {
         JsonObject result = message.result.as<JsonObject>();
-        if (result.containsKey("status") && result["status"].as<std::string>() == "Accepted") {
+        if (result["status"].is<const char*>() && result["status"].as<std::string>() == "Accepted") {
             registered = true;
             Serial.println("Charge point registered with Central System");
-            
+
             // Update heartbeat interval if provided
-            if (result.containsKey("interval")) {
+            if (!result["interval"].isNull()) {
                 heartbeatInterval = result["interval"].as<int>() * 1000; // Convert to milliseconds
             }
         }
@@ -339,18 +359,24 @@ bool OCPPClient::sendStatusNotification(int connectorId, const std::string& stat
 }
 
 void OCPPClient::loop() {
-    if (wsClient) {
-        // wsClient->loop(); // Method may not exist on all implementations
+    if (wsClient && !wsClient->isConnected()) {
+        if (connected) {
+            connected = false;
+            registered = false;
+        }
+        attemptReconnect();
+        return;
     }
-    
+
     if (connected) {
         processHeartbeat();
         retryPendingMessages();
-        
+
         // Check connection timeout
         if (stats.lastConnectionTime > 0) {
             unsigned long now = millis();
             // Add connection monitoring logic here
+            (void)now;
         }
     }
 }
@@ -386,6 +412,21 @@ void OCPPClient::retryPendingMessages() {
             }
         } else {
             ++it;
+        }
+    }
+}
+
+void OCPPClient::attemptReconnect() {
+    unsigned long now = millis();
+    if (lastReconnectAttempt == 0 || (now - lastReconnectAttempt) >= reconnectDelayMs) {
+        lastReconnectAttempt = now;
+        Serial.printf("Attempting reconnect (delay %lu ms)\n", reconnectDelayMs);
+
+        if (connect()) {
+            reconnectDelayMs = reconnectDelayInitialMs;
+        } else {
+            unsigned long nextDelay = reconnectDelayMs * 2;
+            reconnectDelayMs = std::min(nextDelay, reconnectDelayMaxMs);
         }
     }
 }

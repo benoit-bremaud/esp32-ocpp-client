@@ -1,5 +1,6 @@
 #include <unity.h>
 #include "../../src/infrastructure/ocpp/OCPPMessageParser.h"
+#include "../../src/infrastructure/ocpp/OCPPClient.h"
 #include "../mocks/MockWebSocketClient.h"
 #include "../mocks/MockFileSystem.h"
 #include "../../src/infrastructure/storage/LittleFSConfigRepository.h"
@@ -62,6 +63,26 @@ void test_parse_call_error_message() {
     TEST_ASSERT_EQUAL_STRING("12345", parsedMessage->messageId.c_str());
     TEST_ASSERT_EQUAL_STRING("NotSupported", parsedMessage->errorCode.c_str());
     TEST_ASSERT_EQUAL_STRING("Request not supported", parsedMessage->errorDescription.c_str());
+}
+
+void test_reconnect_backoff() {
+    auto wsClient = std::make_unique<MockWebSocketClient>();
+    auto* wsClientPtr = wsClient.get();
+    wsClientPtr->setShouldFailConnection(true);
+
+    Infrastructure::OCPPClient client(
+        std::move(wsClient),
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr);
+
+    client.loop();
+    TEST_ASSERT_EQUAL_INT(1, wsClientPtr->getConnectAttempts());
+
+    client.loop();
+    TEST_ASSERT_EQUAL_INT(1, wsClientPtr->getConnectAttempts());
 }
 
 void test_validate_message_call_ok() {
@@ -176,6 +197,7 @@ void setup() {
     RUN_TEST(test_parse_call_message);
     RUN_TEST(test_parse_call_result_message);
     RUN_TEST(test_parse_call_error_message);
+    RUN_TEST(test_reconnect_backoff);
     RUN_TEST(test_validate_message_call_ok);
     RUN_TEST(test_validate_message_missing_action);
     RUN_TEST(test_serialize_call_message);

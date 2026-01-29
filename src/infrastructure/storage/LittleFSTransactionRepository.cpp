@@ -29,7 +29,7 @@ std::vector<Core::Domain::Transaction> LittleFSTransactionRepository::loadAll() 
         return transactions;
     }
 
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc;
     if (deserializeJson(doc, content)) {
         return transactions;
     }
@@ -61,11 +61,11 @@ bool LittleFSTransactionRepository::saveAll(const std::vector<Core::Domain::Tran
         return false;
     }
 
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc;
     JsonArray array = doc.to<JsonArray>();
 
     for (const auto& tx : transactions) {
-        JsonObject obj = array.createNestedObject();
+        JsonObject obj = array.add<JsonObject>();
         obj["transactionId"] = tx.transactionId;
         obj["connectorId"] = tx.connectorId;
         obj["idTag"] = tx.idTag;
@@ -78,7 +78,9 @@ bool LittleFSTransactionRepository::saveAll(const std::vector<Core::Domain::Tran
     }
 
     std::string output;
-    serializeJson(doc, output);
+    if (serializeJson(doc, output) == 0) {
+        return false;
+    }
     return fileSystem->writeFile(transactionPath, output);
 }
 
