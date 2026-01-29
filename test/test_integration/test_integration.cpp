@@ -14,7 +14,7 @@ std::unique_ptr<MockConfigRepository> configRepo;
 std::unique_ptr<MockTransactionRepository> transactionRepo;
 std::unique_ptr<MockHardwareController> hardware;
 std::unique_ptr<MockIdGenerator> idGenerator;
-std::unique_ptr<MockClock> clock;
+std::unique_ptr<MockClock> clockSource;
 std::unique_ptr<UseCaseFactory> useCaseFactory;
 
 void setUp() {
@@ -22,19 +22,19 @@ void setUp() {
     transactionRepo = std::make_unique<MockTransactionRepository>();
     hardware = std::make_unique<MockHardwareController>();
     idGenerator = std::make_unique<MockIdGenerator>(5000);
-    clock = std::make_unique<MockClock>();
+    clockSource = std::make_unique<MockClock>();
     useCaseFactory = std::make_unique<UseCaseFactory>(
         transactionRepo.get(),
         hardware.get(),
         configRepo.get(),
         nullptr,
         idGenerator.get(),
-        clock.get());
+        clockSource.get());
 }
 
 void tearDown() {
     useCaseFactory.reset();
-    clock.reset();
+    clockSource.reset();
     idGenerator.reset();
     hardware.reset();
     transactionRepo.reset();
@@ -46,7 +46,7 @@ void test_complete_transaction_flow() {
 
     StartTransactionCommand startCmd;
     startCmd.connectorId = 1;
-    startCmd.idTag = "INTEGRATION_TAG";
+    startCmd.idTag = "INTEGRATIONTAG";
     startCmd.meterStart = 1000;
 
     auto startUseCase = useCaseFactory->createStartTransactionUseCase();
@@ -81,11 +81,21 @@ void test_status_notification_flow() {
     TEST_ASSERT_EQUAL_STRING("Available", result.data.status.c_str());
 }
 
-void setup() {
+static int run_tests() {
     UNITY_BEGIN();
     RUN_TEST(test_complete_transaction_flow);
     RUN_TEST(test_status_notification_flow);
-    UNITY_END();
+    return UNITY_END();
+}
+
+#ifdef ARDUINO
+void setup() {
+    run_tests();
 }
 
 void loop() {}
+#else
+int main(int, char**) {
+    return run_tests();
+}
+#endif

@@ -45,13 +45,23 @@ void test_meter_value_defaults() {
     TEST_ASSERT_EQUAL_STRING("Wh", mv.sampledValues[0].unit.c_str());
 }
 
-void setup() {
+static int run_tests() {
     UNITY_BEGIN();
     RUN_TEST(test_configuration_default_values);
     RUN_TEST(test_transaction_entity_creation);
     RUN_TEST(test_connector_default_status);
     RUN_TEST(test_meter_value_defaults);
-    UNITY_END();
+    return UNITY_END();
+}
+
+#ifdef ARDUINO
+void setup() {
+    run_tests();
 }
 
 void loop() {}
+#else
+int main(int, char**) {
+    return run_tests();
+}
+#endif

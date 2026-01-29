@@ -1,12 +1,14 @@
 /**
  * @file test_runner.cpp
  * @brief Simple Test Runner for ESP32 OCPP Client
- * 
+ *
  * This is a simplified test runner that tests individual components
  * without requiring the full build system to compile successfully.
  * It focuses on core domain logic and application services that
  * should be independent of infrastructure concerns.
  */
+
+#ifdef ARDUINO
 
 #include <unity.h>
 #include <Arduino.h>
@@ -560,3 +562,5 @@ void loop() {
         lastMemCheck = millis();
     }
 }
+
+#endif // ARDUINO

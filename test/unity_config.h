@@ -7,7 +7,11 @@
  * on the ESP32 platform with CLEAN architecture patterns.
  */
 
+#ifdef ARDUINO
 #include <Arduino.h>
+#else
+#include <stdio.h>
+#endif
 
 // Unity configuration
 #define UNITY_INCLUDE_DOUBLE
@@ -15,10 +19,17 @@
 #define UNITY_SUPPORT_64
 
 // Test output configuration
+#ifdef ARDUINO
 #define UNITY_OUTPUT_START()    Serial.begin(115200)
 #define UNITY_OUTPUT_CHAR(c)    Serial.write(c)
 #define UNITY_OUTPUT_FLUSH()    Serial.flush()
 #define UNITY_OUTPUT_COMPLETE() Serial.println("\n--- Test Complete ---")
+#else
+#define UNITY_OUTPUT_START()    ((void)0)
+#define UNITY_OUTPUT_CHAR(c)    putchar(c)
+#define UNITY_OUTPUT_FLUSH()    fflush(stdout)
+#define UNITY_OUTPUT_COMPLETE() printf("\n--- Test Complete ---\n")
+#endif
 
 // Memory management for embedded testing
 #define UNITY_MAX_DETAILS       100

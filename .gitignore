@@ -65,3 +65,4 @@ Thumbs.db
 # Tooling
 compile_commands.json
 simple_test.ini
+.pio-home/

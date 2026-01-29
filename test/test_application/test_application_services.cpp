@@ -14,7 +14,7 @@ std::unique_ptr<MockConfigRepository> configRepo;
 std::unique_ptr<MockTransactionRepository> transactionRepo;
 std::unique_ptr<MockHardwareController> hardware;
 std::unique_ptr<MockIdGenerator> idGenerator;
-std::unique_ptr<MockClock> clock;
+std::unique_ptr<MockClock> clockSource;
 std::unique_ptr<UseCaseFactory> useCaseFactory;
 
 void setUp() {
@@ -22,19 +22,19 @@ void setUp() {
     transactionRepo = std::make_unique<MockTransactionRepository>();
     hardware = std::make_unique<MockHardwareController>();
     idGenerator = std::make_unique<MockIdGenerator>(1000);
-    clock = std::make_unique<MockClock>();
+    clockSource = std::make_unique<MockClock>();
     useCaseFactory = std::make_unique<UseCaseFactory>(
         transactionRepo.get(),
         hardware.get(),
         configRepo.get(),
         nullptr,
         idGenerator.get(),
-        clock.get());
+        clockSource.get());
 }
 
 void tearDown() {
     useCaseFactory.reset();
-    clock.reset();
+    clockSource.reset();
     idGenerator.reset();
     hardware.reset();
     transactionRepo.reset();
@@ -114,14 +114,24 @@ void test_change_configuration() {
     TEST_ASSERT_EQUAL_INT(120, cfg.heartbeatInterval);
 }
 
-void setup() {
+static int run_tests() {
     UNITY_BEGIN();
     RUN_TEST(test_start_transaction_success);
     RUN_TEST(test_start_transaction_invalid_connector);
     RUN_TEST(test_stop_transaction_success);
     RUN_TEST(test_authorize_admin_tag);
     RUN_TEST(test_change_configuration);
-    UNITY_END();
+    return UNITY_END();
+}
+
+#ifdef ARDUINO
+void setup() {
+    run_tests();
 }
 
 void loop() {}
+#else
+int main(int, char**) {
+    return run_tests();
+}
+#endif
