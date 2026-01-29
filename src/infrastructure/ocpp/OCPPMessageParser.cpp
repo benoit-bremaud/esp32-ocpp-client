@@ -1,1 +1,198 @@
-#include \"IMessageHandler.h\"\n#include <Arduino.h>\n\nusing namespace Infrastructure;\n\nstd::unique_ptr<OCPPMessage> OCPPMessageParser::parseMessage(const std::string& rawMessage) {\n    JsonDocument doc;\n    DeserializationError error = deserializeJson(doc, rawMessage);\n    \n    if (error) {\n        Serial.printf(\"JSON parse error: %s\\n\", error.c_str());\n        return nullptr;\n    }\n    \n    if (!doc.is<JsonArray>()) {\n        Serial.println(\"Message is not a JSON array\");\n        return nullptr;\n    }\n    \n    JsonArray messageArray = doc.as<JsonArray>();\n    \n    if (!validateMessageFormat(messageArray)) {\n        return nullptr;\n    }\n    \n    int messageTypeInt = messageArray[0];\n    std::string messageId = messageArray[1].as<std::string>();\n    \n    auto message = std::make_unique<OCPPMessage>(static_cast<MessageType>(messageTypeInt), messageId);\n    \n    switch (message->messageType) {\n        case MessageType::CALL:\n            if (messageArray.size() >= 4) {\n                message->action = messageArray[2].as<std::string>();\n                message->payload = messageArray[3];\n            }\n            break;\n            \n        case MessageType::CALLRESULT:\n            if (messageArray.size() >= 3) {\n                message->result = messageArray[2];\n            }\n            break;\n            \n        case MessageType::CALLERROR:\n            if (messageArray.size() >= 5) {\n                message->errorCode = messageArray[2].as<std::string>();\n                message->errorDescription = messageArray[3].as<std::string>();\n                message->errorDetails = messageArray[4];\n            }\n            break;\n    }\n    \n    return message;\n}\n\nstd::string OCPPMessageParser::serializeCall(const std::string& messageId, const std::string& action, const JsonObject& payload) {\n    JsonDocument doc;\n    JsonArray message = doc.to<JsonArray>();\n    \n    message.add(static_cast<int>(MessageType::CALL));\n    message.add(messageId);\n    message.add(action);\n    message.add(payload);\n    \n    std::string result;\n    serializeJson(doc, result);\n    return result;\n}\n\nstd::string OCPPMessageParser::serializeCallResult(const std::string& messageId, const JsonObject& result) {\n    JsonDocument doc;\n    JsonArray message = doc.to<JsonArray>();\n    \n    message.add(static_cast<int>(MessageType::CALLRESULT));\n    message.add(messageId);\n    message.add(result);\n    \n    std::string resultStr;\n    serializeJson(doc, resultStr);\n    return resultStr;\n}\n\nstd::string OCPPMessageParser::serializeCallError(const std::string& messageId, const std::string& errorCode, \n                                                const std::string& errorDescription, const JsonObject& errorDetails) {\n    JsonDocument doc;\n    JsonArray message = doc.to<JsonArray>();\n    \n    message.add(static_cast<int>(MessageType::CALLERROR));\n    message.add(messageId);\n    message.add(errorCode);\n    message.add(errorDescription);\n    message.add(errorDetails);\n    \n    std::string result;\n    serializeJson(doc, result);\n    return result;\n}\n\nbool OCPPMessageParser::validateMessageFormat(const JsonArray& messageArray) {\n    if (messageArray.size() < 3) {\n        Serial.println(\"Message array too short\");\n        return false;\n    }\n    \n    if (!messageArray[0].is<int>()) {\n        Serial.println(\"Message type is not integer\");\n        return false;\n    }\n    \n    int messageType = messageArray[0];\n    if (messageType < 2 || messageType > 4) {\n        Serial.printf(\"Invalid message type: %d\\n\", messageType);\n        return false;\n    }\n    \n    if (!messageArray[1].is<const char*>()) {\n        Serial.println(\"Message ID is not string\");\n        return false;\n    }\n    \n    // Validate message structure based on type\n    switch (messageType) {\n        case static_cast<int>(MessageType::CALL):\n            if (messageArray.size() != 4) {\n                Serial.println(\"CALL message must have 4 elements\");\n                return false;\n            }\n            if (!messageArray[2].is<const char*>()) {\n                Serial.println(\"Action must be string\");\n                return false;\n            }\n            break;\n            \n        case static_cast<int>(MessageType::CALLRESULT):\n            if (messageArray.size() != 3) {\n                Serial.println(\"CALLRESULT message must have 3 elements\");\n                return false;\n            }\n            break;\n            \n        case static_cast<int>(MessageType::CALLERROR):\n            if (messageArray.size() != 5) {\n                Serial.println(\"CALLERROR message must have 5 elements\");\n                return false;\n            }\n            if (!messageArray[2].is<const char*>() || !messageArray[3].is<const char*>()) {\n                Serial.println(\"Error code and description must be strings\");\n                return false;\n            }\n            break;\n    }\n    \n    return true;\n}"
+#include "OCPPMessageParser.h"
+#include <Arduino.h>
+
+namespace Infrastructure {
+
+std::unique_ptr<OCPPMessage> OCPPMessageParser::parseMessage(const std::string& rawMessage) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, rawMessage);
+    
+    if (error) {
+        Serial.printf("JSON parse error: %s\n", error.c_str());
+        return nullptr;
+    }
+    
+    if (!doc.is<JsonArray>()) {
+        Serial.println("Message is not a JSON array");
+        return nullptr;
+    }
+    
+    JsonArray messageArray = doc.as<JsonArray>();
+    
+    if (!validateMessageFormat(messageArray)) {
+        return nullptr;
+    }
+    
+    int messageTypeInt = messageArray[0];
+    std::string messageId = messageArray[1].as<std::string>();
+    
+    auto message = std::make_unique<OCPPMessage>(static_cast<MessageType>(messageTypeInt), messageId);
+    
+    switch (message->messageType) {
+        case MessageType::CALL:
+            if (messageArray.size() >= 4) {
+                message->action = messageArray[2].as<std::string>();
+                message->payload = messageArray[3];
+            }
+            break;
+            
+        case MessageType::CALLRESULT:
+            if (messageArray.size() >= 3) {
+                message->result = messageArray[2];
+            }
+            break;
+            
+        case MessageType::CALLERROR:
+            if (messageArray.size() >= 5) {
+                message->errorCode = messageArray[2].as<std::string>();
+                message->errorDescription = messageArray[3].as<std::string>();
+                message->errorDetails = messageArray[4];
+            }
+            break;
+    }
+    
+    return message;
+}
+
+std::string OCPPMessageParser::serializeCall(const std::string& messageId, const std::string& action, const JsonObject& payload) {
+    JsonDocument doc;
+    JsonArray message = doc.to<JsonArray>();
+    
+    message.add(static_cast<int>(MessageType::CALL));
+    message.add(messageId);
+    message.add(action);
+    message.add(payload);
+    
+    std::string result;
+    serializeJson(doc, result);
+    return result;
+}
+
+std::string OCPPMessageParser::serializeCallResult(const std::string& messageId, const JsonObject& result) {
+    JsonDocument doc;
+    JsonArray message = doc.to<JsonArray>();
+    
+    message.add(static_cast<int>(MessageType::CALLRESULT));
+    message.add(messageId);
+    message.add(result);
+    
+    std::string resultStr;
+    serializeJson(doc, resultStr);
+    return resultStr;
+}
+
+std::string OCPPMessageParser::serializeCallError(const std::string& messageId, const std::string& errorCode, 
+                                                const std::string& errorDescription, const JsonObject& errorDetails) {
+    JsonDocument doc;
+    JsonArray message = doc.to<JsonArray>();
+    
+    message.add(static_cast<int>(MessageType::CALLERROR));
+    message.add(messageId);
+    message.add(errorCode);
+    message.add(errorDescription);
+    message.add(errorDetails);
+    
+    std::string result;
+    serializeJson(doc, result);
+    return result;
+}
+
+bool OCPPMessageParser::validateMessage(const OCPPMessage& message) {
+    if (message.messageId.empty()) {
+        Serial.println("Message validation failed: empty messageId");
+        return false;
+    }
+
+    switch (message.messageType) {
+        case MessageType::CALL:
+            if (message.action.empty()) {
+                Serial.println("Message validation failed: CALL missing action");
+                return false;
+            }
+            if (!message.payload.is<JsonObject>()) {
+                Serial.println("Message validation failed: CALL payload is not object");
+                return false;
+            }
+            break;
+        case MessageType::CALLRESULT:
+            if (!message.result.is<JsonObject>()) {
+                Serial.println("Message validation failed: CALLRESULT payload is not object");
+                return false;
+            }
+            break;
+        case MessageType::CALLERROR:
+            if (message.errorCode.empty() || message.errorDescription.empty()) {
+                Serial.println("Message validation failed: CALLERROR missing fields");
+                return false;
+            }
+            if (!message.errorDetails.isNull() && !message.errorDetails.is<JsonObject>()) {
+                Serial.println("Message validation failed: CALLERROR details not object");
+                return false;
+            }
+            break;
+        default:
+            Serial.println("Message validation failed: unknown type");
+            return false;
+    }
+
+    return true;
+}
+
+bool OCPPMessageParser::validateMessageFormat(const JsonArray& messageArray) {
+    if (messageArray.size() < 3) {
+        Serial.println("Message array too short");
+        return false;
+    }
+    
+    if (!messageArray[0].is<int>()) {
+        Serial.println("Message type is not integer");
+        return false;
+    }
+    
+    int messageType = messageArray[0];
+    if (messageType < 2 || messageType > 4) {
+        Serial.printf("Invalid message type: %d\n", messageType);
+        return false;
+    }
+    
+    if (!messageArray[1].is<const char*>()) {
+        Serial.println("Message ID is not string");
+        return false;
+    }
+    
+    // Validate message structure based on type
+    switch (messageType) {
+        case static_cast<int>(MessageType::CALL):
+            if (messageArray.size() != 4) {
+                Serial.println("CALL message must have 4 elements");
+                return false;
+            }
+            if (!messageArray[2].is<const char*>()) {
+                Serial.println("Action must be string");
+                return false;
+            }
+            break;
+            
+        case static_cast<int>(MessageType::CALLRESULT):
+            if (messageArray.size() != 3) {
+                Serial.println("CALLRESULT message must have 3 elements");
+                return false;
+            }
+            break;
+            
+        case static_cast<int>(MessageType::CALLERROR):
+            if (messageArray.size() != 5) {
+                Serial.println("CALLERROR message must have 5 elements");
+                return false;
+            }
+            if (!messageArray[2].is<const char*>() || !messageArray[3].is<const char*>()) {
+                Serial.println("Error code and description must be strings");
+                return false;
+            }
+            break;
+    }
+    
+    return true;
+}
+
+} // namespace Infrastructure

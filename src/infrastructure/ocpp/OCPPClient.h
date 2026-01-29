@@ -1,1 +1,143 @@
-#pragma once\n\n#include \"IMessageHandler.h\"\n#include \"../SecurityProfiles.h\"\n#include \"../websocket/ArduinoWebSocketClient.h\"\n#include \"../../domain/interfaces/IRepositories.h\"\n#include <map>\n#include <memory>\n#include <queue>\n#include <mutex>\n\nnamespace Infrastructure {\n    \n    /**\n     * @brief Pending message for retry logic\n     */\n    struct PendingMessage {\n        std::string messageId;\n        std::string action;\n        JsonDocument payload;\n        unsigned long timestamp;\n        int retryCount;\n        int maxRetries;\n        \n        PendingMessage(const std::string& id, const std::string& act, const JsonDocument& pay, int maxRet = 3)\n            : messageId(id), action(act), timestamp(millis()), retryCount(0), maxRetries(maxRet) {\n            payload.set(pay);\n        }\n    };\n    \n    /**\n     * @brief Main OCPP Client implementing all OCPP 1.6-J functionality\n     */\n    class OCPPClient {\n    private:\n        // Core dependencies\n        std::unique_ptr<ISecureWebSocketClient> wsClient;\n        Domain::IConfigRepository* configRepo;\n        Domain::ITransactionRepository* transactionRepo;\n        Domain::IHardwareController* hardware;\n        ICertificateManager* certManager;\n        \n        // Message handling\n        std::map<std::string, std::unique_ptr<IMessageHandler>> messageHandlers;\n        std::map<std::string, PendingMessage> pendingMessages;\n        \n        // Connection state\n        bool connected = false;\n        bool registered = false;\n        unsigned long lastHeartbeat = 0;\n        unsigned long heartbeatInterval = 300000; // 5 minutes default\n        \n        // Message ID generation\n        int messageCounter = 0;\n        std::mutex messageCounterMutex;\n        \n        // Configuration cache\n        Domain::Configuration currentConfig;\n        \n        // Security configuration\n        SecurityConfig securityConfig;\n        \n        // Internal methods\n        void setupMessageHandlers();\n        void setupSecurityConfiguration();\n        std::string generateMessageId();\n        void handleIncomingMessage(const std::string& rawMessage);\n        void processHeartbeat();\n        void retryPendingMessages();\n        \n        // Connection callbacks\n        void onWebSocketConnected(bool connected);\n        void onWebSocketMessage(const std::string& message);\n        void onWebSocketError(const std::string& error);\n        \n        // Message sending helpers\n        bool sendCallMessage(const std::string& action, const JsonObject& payload);\n        bool sendCallResultMessage(const std::string& messageId, const JsonObject& result);\n        bool sendCallErrorMessage(const std::string& messageId, const std::string& errorCode, \n                                const std::string& errorDescription, const JsonObject& errorDetails = JsonObject());\n        \n    public:\n        OCPPClient(std::unique_ptr<ISecureWebSocketClient> wsClient,\n                  Domain::IConfigRepository* configRepo,\n                  Domain::ITransactionRepository* transactionRepo,\n                  Domain::IHardwareController* hardware,\n                  ICertificateManager* certManager);\n        \n        ~OCPPClient();\n        \n        // Lifecycle management\n        bool initialize();\n        void loop(); // Must be called regularly in main loop\n        void shutdown();\n        \n        // Connection management\n        bool connect();\n        void disconnect();\n        bool isConnected() const { return connected; }\n        bool isRegistered() const { return registered; }\n        \n        // Core Profile - Charge Point Initiated Messages\n        bool sendBootNotification();\n        bool sendHeartbeat();\n        bool sendStatusNotification(int connectorId, const std::string& status, \n                                  const std::string& errorCode = \"NoError\");\n        bool sendAuthorize(const std::string& idTag);\n        bool sendStartTransaction(int connectorId, const std::string& idTag, int meterStart, \n                                const std::string& timestamp = \"\");\n        bool sendStopTransaction(int transactionId, int meterStop, \n                               const std::string& reason = \"Local\", const std::string& timestamp = \"\");\n        bool sendMeterValues(int connectorId, const std::vector<Domain::MeterValue>& meterValues);\n        \n        // Data Transfer (for custom messages)\n        bool sendDataTransfer(const std::string& vendorId, const std::string& messageId = \"\", \n                            const JsonObject& data = JsonObject());\n        \n        // Status and diagnostics\n        std::string getConnectionStatus();\n        SecurityProfile getActiveSecurityProfile();\n        std::map<std::string, std::string> getDiagnosticInfo();\n        \n        // Configuration management\n        bool updateConfiguration(const Domain::Configuration& config);\n        Domain::Configuration getConfiguration() const { return currentConfig; }\n        \n        // Transaction management\n        std::vector<Domain::Transaction> getActiveTransactions();\n        bool hasActiveTransaction(int connectorId);\n        \n        // Error handling and recovery\n        void handleConnectionError();\n        void retryFailedMessages();\n        void clearMessageQueue();\n        \n        // Statistics\n        struct Statistics {\n            unsigned long totalMessagesSent = 0;\n            unsigned long totalMessagesReceived = 0;\n            unsigned long totalErrors = 0;\n            unsigned long connectionUptime = 0;\n            unsigned long lastConnectionTime = 0;\n        } stats;\n        \n        Statistics getStatistics() const { return stats; }\n    };\n}"
+#pragma once
+
+#include "IMessageHandler.h"
+#include "OCPPMessageParser.h"
+#include "SecurityProfiles.h"
+#include "websocket/ArduinoWebSocketClient.h"
+#include "../../../core/domain/entities/Configuration.h"
+#include "../../../core/domain/ports/IConfigRepository.h"
+#include "../../../core/domain/ports/IHardwareController.h"
+#include "../../../core/domain/ports/ITransactionRepository.h"
+#include "../../../core/application/usecases/OCPPUseCases.h"
+#include <map>
+#include <memory>
+#include <queue>
+#include <mutex>
+
+namespace Infrastructure {
+    
+    /**
+     * @brief Pending message for retry logic
+     */
+    struct PendingMessage {
+        std::string messageId;
+        std::string action;
+        JsonDocument payload;
+        unsigned long timestamp;
+        int retryCount;
+        int maxRetries;
+        
+        // Default constructor
+        PendingMessage() : timestamp(0), retryCount(0), maxRetries(3) {}
+        
+        PendingMessage(const std::string& id, const std::string& act, const JsonDocument& pay, int maxRet = 3)
+            : messageId(id), action(act), timestamp(millis()), retryCount(0), maxRetries(maxRet) {
+            payload.set(pay);
+        }
+    };
+    
+    /**
+     * @brief Main OCPP Client implementing all OCPP 1.6-J functionality
+     */
+    class OCPPClient {
+    private:
+        // Core dependencies
+        std::unique_ptr<ISecureWebSocketClient> wsClient;
+        Core::Domain::IConfigRepository* configRepo;
+        Core::Domain::ITransactionRepository* transactionRepo;
+        Core::Domain::IHardwareController* hardware;
+        ICertificateManager* certManager;
+        Core::Application::UseCaseFactory* useCaseFactory;
+        
+        // Message handling
+        std::map<std::string, std::unique_ptr<IMessageHandler>> messageHandlers;
+        std::map<std::string, PendingMessage> pendingMessages;
+        
+        // Connection state
+        bool connected = false;
+        bool registered = false;
+        unsigned long lastHeartbeat = 0;
+        unsigned long heartbeatInterval = 300000; // 5 minutes default
+        unsigned long lastReconnectAttempt = 0;
+        unsigned long reconnectDelayMs = 0;
+        unsigned long reconnectDelayInitialMs = 0;
+        unsigned long reconnectDelayMaxMs = 0;
+        
+        // Message ID generation
+        int messageCounter = 0;
+        std::mutex messageCounterMutex;
+        
+        // Configuration cache
+        Core::Domain::Configuration currentConfig;
+        
+        // Security configuration
+        SecurityConfig securityConfig;
+        
+        // Internal methods
+        void setupMessageHandlers();
+        void setupSecurityConfiguration();
+        std::string generateMessageId();
+        void handleIncomingMessage(const std::string& rawMessage);
+        void handleIncomingCall(OCPPMessage& message);
+        void handleIncomingCallResult(OCPPMessage& message);
+        void handleIncomingCallError(OCPPMessage& message);
+        void processHeartbeat();
+        void retryPendingMessages();
+        void attemptReconnect();
+        
+        // Connection callbacks
+        void onWebSocketConnected(bool connected);
+        void onWebSocketMessage(const std::string& message);
+        void onWebSocketError(const std::string& error);
+        
+        // Message sending helpers
+        bool sendCallMessage(const std::string& action, const JsonObject& payload);
+        bool sendCallResultMessage(const std::string& messageId, const JsonObject& result);
+        bool sendCallErrorMessage(const std::string& messageId, const std::string& errorCode, 
+                                const std::string& errorDescription, const JsonObject& errorDetails = JsonObject());
+        
+    public:
+        OCPPClient(std::unique_ptr<ISecureWebSocketClient> wsClient,
+                   Core::Domain::IConfigRepository* configRepo,
+                   Core::Domain::ITransactionRepository* transactionRepo,
+                   Core::Domain::IHardwareController* hardware,
+                   ICertificateManager* certManager,
+                   Core::Application::UseCaseFactory* useCaseFactory);
+        
+        ~OCPPClient();
+        
+        void loop(); // Must be called regularly in main loop
+        void shutdown();
+        
+        // Connection management
+        bool connect();
+        void disconnect();
+        bool isConnected() const;
+        bool isRegistered() const;
+        
+        // Core Profile - Charge Point Initiated Messages
+        bool sendBootNotification();
+        bool sendHeartbeat();
+        bool sendStatusNotification(int connectorId, const std::string& status, 
+                                  const std::string& errorCode = "NoError");
+        
+        // Status and diagnostics
+        std::string getConnectionStatus();
+        SecurityProfile getActiveSecurityProfile();
+
+        // Error handling and recovery
+        void handleConnectionError();
+        
+        // Statistics
+        struct Statistics {
+            unsigned long totalMessagesSent = 0;
+            unsigned long totalMessagesReceived = 0;
+            unsigned long totalErrors = 0;
+            unsigned long connectionUptime = 0;
+            unsigned long lastConnectionTime = 0;
+        } stats;
+        
+        Statistics getStatistics() const { return stats; }
+    };
+    
+} // namespace Infrastructure
